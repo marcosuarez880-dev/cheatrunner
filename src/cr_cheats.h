@@ -7,6 +7,8 @@
 #include <time.h>
 #include <sys/types.h>
 
+typedef struct cJSON cJSON;
+
 #define MAX_CHEAT_CANDIDATES 64
 
 /* cheat_candidate_entry_t.match values */
@@ -130,6 +132,15 @@ void mod_enabled_clear_for_pid(pid_t pid);
 int cheat_any_enabled_for_title(const char *title_id, pid_t pid);
 void fmt_hex16(const uint8_t *b, size_t len, char *buf, size_t buf_sz);
 int apply_cheat_json(const char *title_id, int mod_index, int turn_on, char *err, size_t err_size);
+
+/* Master-code-dependent address resolution — shared between apply and state-read paths. */
+cJSON *find_master_code_mod_for(cJSON *mods, int target_mod_idx);
+uint64_t mc_mod_first_offset(cJSON *mc_mod);
+int mc_scan_dep_addr(pid_t pid, intptr_t mc_addr,
+                      const uint8_t *mc_on, size_t mc_on_len,
+                      const uint8_t *dep_off, size_t dep_off_len,
+                      uint64_t mc_base_off, uint64_t dep_raw_off,
+                      intptr_t *addr_out);
 
 /* Persist crash suspects to / from disk so they survive CheatRunner restarts */
 void crash_suspects_save(void);

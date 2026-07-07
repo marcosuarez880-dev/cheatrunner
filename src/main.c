@@ -27,7 +27,7 @@
 #include "cr_tile_pkg.h"
 
 #ifndef CHEATRUNNER_VERSION
-#define CHEATRUNNER_VERSION "0.14"
+#define CHEATRUNNER_VERSION "0.15"
 #endif
 
 /* Async-signal-safe crash handler: writes a one-line entry to the crash log
@@ -143,9 +143,15 @@ main(void) {
 
   pthread_t http_thread;
   pthread_t monitor_thread;
+  pthread_t net_watchdog_thread;
   if (pthread_create(&http_thread, NULL, http_server_thread, NULL) != 0) {
     log_msg("error: could not start HTTP thread");
     notify("CheatRunner HTTP thread failed");
+    return 1;
+  }
+  if (pthread_create(&net_watchdog_thread, NULL, http_net_watchdog_thread, NULL) != 0) {
+    log_msg("error: could not start network watchdog thread");
+    notify("CheatRunner network watchdog thread failed");
     return 1;
   }
   if (pthread_create(&monitor_thread, NULL, game_monitor_thread, NULL) != 0) {
@@ -157,5 +163,6 @@ main(void) {
   pthread_join(http_thread, NULL);
   g_game_monitor_running = 0;
   pthread_join(monitor_thread, NULL);
+  pthread_join(net_watchdog_thread, NULL);
   return 0;
 }

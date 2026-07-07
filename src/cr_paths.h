@@ -24,7 +24,7 @@
 #define CHEATRUNNER_CACHE_TITLE_NAMES_DIR "/data/cheatrunner/cache/title-names"
 #define CHEATRUNNER_CONFIG_PATH       "/data/cheatrunner/config.ini"
 #define CHEATRUNNER_SOURCES_PATH      "/data/cheatrunner/sources.json"
-#define CHEATRUNNER_LOG_PATH          "/data/cheatrunner/logs.json"
+#define CHEATRUNNER_LOG_PATH          "/data/cheatrunner/logs.txt"
 #define CHEATRUNNER_NOTIFICATIONS_PATH "/data/cheatrunner/notifications.json"
 #define CHEATRUNNER_ACTIVITY_PATH       "/data/cheatrunner/activity.json"
 #define CHEATRUNNER_CRASH_SUSPECTS_PATH "/data/cheatrunner/crash_suspects.json"

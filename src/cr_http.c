@@ -4,6 +4,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,6 +25,7 @@
 static volatile int g_http_listen_notified = 0;
 char g_listen_ip[64] = "127.0.0.1";
 int g_http_listen_fd = -1;
+_Thread_local int g_http_keep_alive = 0;
 
 #define HTTP_MAX_CONCURRENT 24
 static volatile int  g_active_clients = 0;
@@ -135,11 +137,12 @@ http_send_json(int fd, int status, const char *body) {
                    "HTTP/1.1 %d OK\r\n"
                    "Content-Type: application/json\r\n"
                    "Content-Length: %u\r\n"
-                   "Connection: close\r\n"
+                   "Connection: %s\r\n"
                    "Access-Control-Allow-Origin: *\r\n"
                    "Cache-Control: no-cache\r\n"
                    "\r\n",
-                   status, (unsigned int)strlen(payload));
+                   status, (unsigned int)strlen(payload),
+                   g_http_keep_alive ? "keep-alive" : "close");
   if (n > 0) {
     (void)socket_send_all(fd, header, (size_t)n);
     (void)socket_send_all(fd, payload, strlen(payload));
@@ -165,125 +168,142 @@ http_grow_buf(char **buf, size_t *cap, size_t need) {
 static void
 http_handle_client(int fd, const char *client_ip) {
   /* Most requests (polling, toggles) are a few KB — start small and grow only
-   * for the rare large upload, instead of malloc'ing MAX_REQ_SIZE every time. */
+   * for the rare large upload, instead of malloc'ing MAX_REQ_SIZE every time.
+   * The buffer is reused across requests on a kept-alive connection. */
   size_t cap = 65536;
   char *req = malloc(cap + 1);
   if (!req) {
     http_send_json(fd, 500, "{\"ok\":false,\"error\":\"alloc\"}");
     return;
   }
-  size_t off = 0;
-  size_t body_len = 0;
 
   struct timeval tv;
-  tv.tv_sec = 10;
+  tv.tv_sec = 20;
   tv.tv_usec = 0;
   setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
   setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
   for (;;) {
-    if (off >= MAX_REQ_SIZE) {
-      break;
-    }
-    if (off >= cap && http_grow_buf(&req, &cap, off + 1) != 0) {
-      http_send_json(fd, 500, "{\"ok\":false,\"error\":\"alloc\"}");
-      free(req);
-      return;
-    }
-    int n = recv(fd, req + off, cap - off, 0);
-    if (n <= 0) {
-      if (n < 0 && errno == EINTR) {
-        continue;
+    size_t off = 0;
+    size_t body_len = 0;
+
+    for (;;) {
+      if (off >= MAX_REQ_SIZE) {
+        break;
       }
-      if (off == 0) {
+      if (off >= cap && http_grow_buf(&req, &cap, off + 1) != 0) {
+        http_send_json(fd, 500, "{\"ok\":false,\"error\":\"alloc\"}");
         free(req);
         return;
       }
-      break;
+      int n = recv(fd, req + off, cap - off, 0);
+      if (n <= 0) {
+        if (n < 0 && errno == EINTR) {
+          continue;
+        }
+        /* Peer closed, or idle timeout waiting for the next request on a
+         * kept-alive connection — either way, nothing more to do here. */
+        free(req);
+        return;
+      }
+      off += (size_t)n;
+      req[off] = '\0';
+      if (strstr(req, "\r\n\r\n") || strstr(req, "\n\n")) {
+        break;
+      }
     }
-    off += (size_t)n;
-    req[off] = '\0';
-    if (strstr(req, "\r\n\r\n") || strstr(req, "\n\n")) {
-      break;
+    if (off == 0) {
+      free(req);
+      return;
     }
-  }
-  if (off == 0) {
-    free(req);
-    return;
-  }
 
-  char *headers_end = strstr(req, "\r\n\r\n");
-  size_t sep_len = 4;
-  if (!headers_end) {
-    headers_end = strstr(req, "\n\n");
-    sep_len = 2;
-  }
-  if (!headers_end) {
-    http_send_json(fd, 400, "{\"ok\":false,\"error\":\"bad request\"}");
-    free(req);
-    return;
-  }
+    char *headers_end = strstr(req, "\r\n\r\n");
+    size_t sep_len = 4;
+    if (!headers_end) {
+      headers_end = strstr(req, "\n\n");
+      sep_len = 2;
+    }
+    if (!headers_end) {
+      http_send_json(fd, 400, "{\"ok\":false,\"error\":\"bad request\"}");
+      free(req);
+      return;
+    }
 
-  size_t header_bytes = (size_t)(headers_end - req);
-  req[header_bytes] = '\0';
-  size_t already_body = off > (header_bytes + sep_len) ? (off - (header_bytes + sep_len)) : 0;
-  size_t content_len = parse_content_length_header(req);
-  size_t used = header_bytes + sep_len;
-  if (used >= MAX_REQ_SIZE || content_len > MAX_REQ_SIZE - used - 1) {
-    http_send_json(fd, 413, "{\"ok\":false,\"error\":\"payload_too_large\"}");
-    free(req);
-    return;
-  }
-  /* Headers parsed — grow straight to the full known size up front, since
-   * pointers taken before a realloc would otherwise dangle. */
-  if (http_grow_buf(&req, &cap, used + content_len) != 0) {
-    http_send_json(fd, 500, "{\"ok\":false,\"error\":\"alloc\"}");
-    free(req);
-    return;
-  }
-  while (already_body < content_len) {
-    if (off >= MAX_REQ_SIZE) {
+    size_t header_bytes = (size_t)(headers_end - req);
+    req[header_bytes] = '\0';
+    size_t already_body = off > (header_bytes + sep_len) ? (off - (header_bytes + sep_len)) : 0;
+    size_t content_len = parse_content_length_header(req);
+    size_t used = header_bytes + sep_len;
+    if (used >= MAX_REQ_SIZE || content_len > MAX_REQ_SIZE - used - 1) {
       http_send_json(fd, 413, "{\"ok\":false,\"error\":\"payload_too_large\"}");
       free(req);
       return;
     }
-    int n = recv(fd, req + off, cap - off, 0);
-    if (n <= 0) {
-      if (n < 0 && errno == EINTR) {
-        continue;
-      }
-      break;
+    /* Headers parsed — grow straight to the full known size up front, since
+     * pointers taken before a realloc would otherwise dangle. */
+    if (http_grow_buf(&req, &cap, used + content_len) != 0) {
+      http_send_json(fd, 500, "{\"ok\":false,\"error\":\"alloc\"}");
+      free(req);
+      return;
     }
-    off += (size_t)n;
-    already_body += (size_t)n;
-  }
-  if (already_body < content_len) {
-    http_send_json(fd, 400, "{\"ok\":false,\"error\":\"incomplete_body\"}");
-    free(req);
-    return;
-  }
-  body_len = content_len;
-  char *body_ptr = req + header_bytes + sep_len;
-  body_ptr[body_len] = '\0';
+    while (already_body < content_len) {
+      if (off >= MAX_REQ_SIZE) {
+        http_send_json(fd, 413, "{\"ok\":false,\"error\":\"payload_too_large\"}");
+        free(req);
+        return;
+      }
+      int n = recv(fd, req + off, cap - off, 0);
+      if (n <= 0) {
+        if (n < 0 && errno == EINTR) {
+          continue;
+        }
+        break;
+      }
+      off += (size_t)n;
+      already_body += (size_t)n;
+    }
+    if (already_body < content_len) {
+      http_send_json(fd, 400, "{\"ok\":false,\"error\":\"incomplete_body\"}");
+      free(req);
+      return;
+    }
+    body_len = content_len;
+    char *body_ptr = req + header_bytes + sep_len;
+    body_ptr[body_len] = '\0';
 
-  char method[8] = {0};
-  char target[1024] = {0};
-  char version[16] = {0};
-  if (sscanf(req, "%7s %1023s %15s", method, target, version) != 3) {
-    http_send_json(fd, 400, "{\"ok\":false,\"error\":\"bad request\"}");
-    free(req);
-    return;
+    char method[8] = {0};
+    char target[1024] = {0};
+    char version[16] = {0};
+    if (sscanf(req, "%7s %1023s %15s", method, target, version) != 3) {
+      http_send_json(fd, 400, "{\"ok\":false,\"error\":\"bad request\"}");
+      free(req);
+      return;
+    }
+    char *query = strchr(target, '?');
+    if (query) {
+      *query = '\0';
+      query++;
+    } else {
+      query = "";
+    }
+
+    /* HTTP/1.1 defaults to a persistent connection unless the client asks to
+     * close; HTTP/1.0 is the opposite (needs an explicit keep-alive ask). */
+    int wants_close = strcasestr(req, "Connection: close") != NULL;
+    if (!strcasecmp(version, "HTTP/1.0") && !strcasestr(req, "Connection: keep-alive")) {
+      wants_close = 1;
+    }
+    g_http_keep_alive = !wants_close;
+
+    http_route(fd, method, target, query, client_ip ? client_ip : "unknown",
+               body_ptr ? body_ptr : "", body_len);
+
+    if (!g_http_keep_alive) {
+      free(req);
+      return;
+    }
+    /* Loop back and read the next request off the same connection. */
   }
-  char *query = strchr(target, '?');
-  if (query) {
-    *query = '\0';
-    query++;
-  } else {
-    query = "";
-  }
-  http_route(fd, method, target, query, client_ip ? client_ip : "unknown",
-             body_ptr ? body_ptr : "", body_len);
-  free(req);
 }
 
 static void
@@ -442,5 +462,50 @@ http_server_thread(void *arg) {
     }
   }
   cr_log("info", "http", "server stopped");
+  return NULL;
+}
+
+/* SIGCONT fires when the PS5 wakes from standby — accept() may otherwise
+ * keep blocking on a stale socket for a while before erroring out. */
+static volatile sig_atomic_t g_net_resume_flag = 0;
+
+static void
+net_resume_sighandler(int sig) {
+  (void)sig;
+  g_net_resume_flag = 1;
+}
+
+/* Watches for IP changes / console resume so the accept() loop's existing
+ * socket-recreate path (above) is triggered proactively instead of waiting
+ * on accept() to eventually error out on its own. */
+void *
+http_net_watchdog_thread(void *arg) {
+  (void)arg;
+  signal(SIGCONT, net_resume_sighandler);
+  char last_ip[64] = "";
+  while (!g_shutdown_requested) {
+    if (g_net_resume_flag) {
+      g_net_resume_flag = 0;
+      cr_log("info", "http", "console resumed from standby — forcing listener refresh");
+      if (g_http_listen_fd >= 0) {
+        shutdown(g_http_listen_fd, SHUT_RDWR);
+      }
+    }
+
+    char ip[64];
+    if (local_ip(ip, sizeof(ip)) == 0 && strcmp(ip, last_ip) != 0) {
+      if (last_ip[0]) {
+        int port;
+        pthread_mutex_lock(&g_cfg_lock);
+        port = g_cfg.http_port;
+        pthread_mutex_unlock(&g_cfg_lock);
+        cr_log("info", "http", "network address changed: %s -> %s", last_ip, ip);
+        notify("CheatRunner: address changed\nNew: http://%s:%d", ip, port);
+      }
+      snprintf(last_ip, sizeof(last_ip), "%s", ip);
+    }
+
+    sleep(2);
+  }
   return NULL;
 }

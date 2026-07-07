@@ -73,14 +73,18 @@ conflict_map_build(const char *json_text, cheat_conflict_map_t *out) {
         }
     }
 
-    /* group_id = index of nearest preceding mastercode (-1 before any, -2 if mastercode itself); cross-group address overlaps are skipped to avoid false-positive conflicts. */
+    /* group_id = nearest preceding mastercode index (-1 none, -2 is one); name match alone isn't enough, also require a cave-sized (>=16 byte) entry like mod_has_cave_entry(). */
     int mod_group[CONFLICT_MAX_MODS];
     for (int mi = 0; mi < mod_count; mi++) mod_group[mi] = -1;
     {
         int last_mc = -1;
         for (int mi = 0; mi < mod_count; mi++) {
             const char *nm = out->mod_names[mi];
-            if (strcasestr(nm, "mastercode") || strcasestr(nm, "master code")) {
+            int has_cave = 0;
+            for (int ei = 0; ei < entry_n[mi]; ei++) {
+                if ((*entries_p)[mi][ei].len >= 16) { has_cave = 1; break; }
+            }
+            if ((strcasestr(nm, "mastercode") || strcasestr(nm, "master code")) && has_cave) {
                 mod_group[mi] = -2; /* IS a mastercode */
                 last_mc = mi;
             } else {

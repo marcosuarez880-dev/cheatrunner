@@ -41,7 +41,7 @@ static unsigned long
 vmspace_pmap_offset(unsigned int fw) {
   if (fw >= 0x100 && fw <= 0x102) return 0x2C0;
   if (fw >= 0x105 && fw <= 0x550) return 0x2E0;
-  if (fw >= 0x600 && fw <= 0x1200) return 0x2E8;
+  if (fw >= 0x600 && fw <= 0x1340) return 0x2E8;
   return 0; /* unsupported fw version */
 }
 

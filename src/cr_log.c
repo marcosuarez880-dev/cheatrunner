@@ -7,6 +7,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "cr_log.h"
+#include "cr_paths.h"
 
 /* Write to klogsrv via sendsyslog (syscall 0x259).
  * klogsrv reads /dev/klog which receives messages written via this syscall.
@@ -41,6 +42,30 @@ klog_send(const char *level, const char *tag, const char *msg) {
   if (n > 0) {
     klog_raw(buf);
   }
+}
+
+/* Plain-text session log at CHEATRUNNER_LOG_PATH, opened once (truncating any
+ * previous session's file) and appended to for the lifetime of the process.
+ * Caller must hold g_log_lock. */
+static FILE *g_log_file = NULL;
+
+static void
+log_file_write_locked(const char *level, const char *tag, const char *message, time_t ts) {
+  if (!g_log_file) {
+    /* /data/cheatrunner may not exist yet this early in boot (ensure_data_dirs()
+     * runs after several log lines) — keep retrying until it does, rather than
+     * giving up for the rest of the session on the first failed attempt. */
+    g_log_file = fopen(CHEATRUNNER_LOG_PATH, "w");
+  }
+  if (!g_log_file) {
+    return;
+  }
+  struct tm tmv;
+  char tbuf[24];
+  localtime_r(&ts, &tmv);
+  strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
+  fprintf(g_log_file, "%s [%s] [%s] %s\n", tbuf, level, tag, message);
+  fflush(g_log_file);
 }
 
 pthread_mutex_t g_log_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -107,6 +132,7 @@ log_push(const char *level, const char *tag, const char *message) {
   snprintf(g_logs[idx].level, sizeof(g_logs[idx].level), "%s", level ? level : "info");
   snprintf(g_logs[idx].tag, sizeof(g_logs[idx].tag), "%s", tag ? tag : "core");
   snprintf(g_logs[idx].message, sizeof(g_logs[idx].message), "%s", message ? message : "");
+  log_file_write_locked(g_logs[idx].level, g_logs[idx].tag, g_logs[idx].message, now);
   pthread_mutex_unlock(&g_log_lock);
 }
 

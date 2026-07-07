@@ -103,20 +103,24 @@ const char *
 xml_find_attr(const char *node, const char *attr, size_t *len_out) {
   char needle[64];
   const char *p;
+  char quote;
   if (!node || !attr || !len_out) {
     return NULL;
   }
   snprintf(needle, sizeof(needle), "%s=\"", attr);
   p = strstr(node, needle);
-  if (!p) {
+  if (p) {
+    quote = '"';
+  } else {
     snprintf(needle, sizeof(needle), "%s='", attr);
     p = strstr(node, needle);
     if (!p) {
       return NULL;
     }
+    quote = '\'';
   }
   p += strlen(needle);
-  const char *end = strpbrk(p, "\"'");
+  const char *end = strchr(p, quote);
   if (!end) {
     return NULL;
   }
@@ -231,6 +235,7 @@ shn_xml_to_json(const char *xml, size_t xml_len) {
   cheat_buf_t out = {0};
   cheat_buf_puts(&out, "{\"name\":\"\",\"id\":\"\",\"version\":\"\",\"process\":\"eboot.bin\",\"mods\":[");
 
+  char moder[256] = {0};
   size_t alen = 0;
   const char *trainer = strstr(xml, "<Trainer");
   if (trainer) {
@@ -241,6 +246,14 @@ shn_xml_to_json(const char *xml, size_t xml_len) {
       if (tn < sizeof(tag)) {
         memcpy(tag, trainer, tn);
         tag[tn] = '\0';
+        {
+          size_t moder_len = 0;
+          const char *mv = xml_find_attr(tag, "Moder", &moder_len);
+          if (mv && moder_len > 0 && moder_len < sizeof(moder)) {
+            memcpy(moder, mv, moder_len);
+            moder[moder_len] = '\0';
+          }
+        }
         const char *v = xml_find_attr(tag, "Game", &alen);
         if (!v) {
           v = xml_find_attr(tag, "GameName", &alen);
@@ -417,7 +430,13 @@ shn_xml_to_json(const char *xml, size_t xml_len) {
     cur = body_end + strlen("</Cheat>");
   }
 
-  cheat_buf_puts(&out, "]}");
+  cheat_buf_puts(&out, "]");
+  if (moder[0]) {
+    cheat_buf_puts(&out, ",\"credits\":[\"");
+    cheat_buf_puts_json(&out, moder, strlen(moder));
+    cheat_buf_puts(&out, "\"]");
+  }
+  cheat_buf_puts(&out, "}");
   return out.buf;
 }
 

@@ -828,9 +828,31 @@ crash_suspects_load(void) {
     cr_log("info", "cheats.guard", "loaded %d crash suspect(s) from disk", loaded);
 }
 
-/* Nearest preceding mod whose name contains "mastercode" — governs target_mod_idx
- * (supports multiple mastercode groups in one file). */
-static cJSON *
+/* Returns 1 if any of the mod's entries has a cave-sized (>=16 byte) ON value —
+ * real master-code mods define a shared cave; dependents that merely mention
+ * "master code" in their own name never do. */
+static int
+mod_has_cave_entry(cJSON *mod) {
+  cJSON *mem = cJSON_GetObjectItem(mod, "memory");
+  if (!cJSON_IsArray(mem)) return 0;
+  cJSON *e = NULL;
+  cJSON_ArrayForEach(e, mem) {
+    cJSON *on_j = cJSON_GetObjectItem(e, "on");
+    if (!cJSON_IsString(on_j) || !on_j->valuestring) continue;
+    uint8_t buf[128];
+    size_t len = 0;
+    if (parse_hex_bytes_checked(on_j->valuestring, buf, sizeof(buf), &len) == 0 && len >= 16) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/* Nearest preceding mod whose name contains "mastercode" AND defines a cave —
+ * governs target_mod_idx (supports multiple mastercode groups in one file).
+ * The cave requirement excludes dependents that merely mention "master code"
+ * in their own descriptive name (e.g. "MUST enable Master Code first"). */
+cJSON *
 find_master_code_mod_for(cJSON *mods, int target_mod_idx) {
   cJSON *m = NULL;
   cJSON *last_mc = NULL;
@@ -840,7 +862,8 @@ find_master_code_mod_for(cJSON *mods, int target_mod_idx) {
     cJSON *name_j = cJSON_GetObjectItem(m, "name");
     if (cJSON_IsString(name_j) && name_j->valuestring &&
         (strcasestr(name_j->valuestring, "mastercode") ||
-         strcasestr(name_j->valuestring, "master code"))) {
+         strcasestr(name_j->valuestring, "master code")) &&
+        mod_has_cave_entry(m)) {
       last_mc = m;
     }
     i++;
@@ -865,7 +888,7 @@ fixup_mc_dependent_addr(uint64_t mc_base_off, uint64_t dep_off) {
 
 /* Scan the live MC region for dep_off bytes; falls back to the low-byte
  * combination if not found. Returns 0 on read failure (addr_out unchanged). */
-static int
+int
 mc_scan_dep_addr(pid_t pid, intptr_t mc_addr,
                  const uint8_t *mc_on, size_t mc_on_len,
                  const uint8_t *dep_off, size_t dep_off_len,
@@ -909,8 +932,41 @@ mc_scan_dep_addr(pid_t pid, intptr_t mc_addr,
   return 1;
 }
 
+/* Returns 1 if some other entry in the file resolves within `radius` bytes of
+ * target_addr and its live bytes verifiably match its own ON or OFF —
+ * evidence target_addr sits in the same legitimate cave block, not a wrong address. */
+static int
+cave_has_verified_neighbor(cJSON *mods, pid_t pid, intptr_t mod_base, intptr_t target_addr, uint64_t radius) {
+  cJSON *m = NULL;
+  cJSON_ArrayForEach(m, mods) {
+    cJSON *mem = cJSON_GetObjectItem(m, "memory");
+    if (!cJSON_IsArray(mem)) continue;
+    cJSON *e = NULL;
+    cJSON_ArrayForEach(e, mem) {
+      cJSON *off_j  = cJSON_GetObjectItem(e, "offset");
+      cJSON *on_j   = cJSON_GetObjectItem(e, "on");
+      cJSON *off2_j = cJSON_GetObjectItem(e, "off");
+      if (!cJSON_IsString(off_j) || !cJSON_IsString(on_j) || !cJSON_IsString(off2_j)) continue;
+      uint64_t off_u = 0;
+      if (parse_offset_hex_checked(off_j->valuestring, &off_u) != 0) continue;
+      intptr_t cand = mod_base + (intptr_t)off_u;
+      if (cand == target_addr) continue;
+      uint64_t dist = cand > target_addr ? (uint64_t)(cand - target_addr) : (uint64_t)(target_addr - cand);
+      if (dist > radius) continue;
+      uint8_t on_b[128], off_b[128], cur[128];
+      size_t on_len = 0, off_len = 0;
+      if (parse_hex_bytes_checked(on_j->valuestring, on_b, sizeof(on_b), &on_len) != 0 ||
+          parse_hex_bytes_checked(off2_j->valuestring, off_b, sizeof(off_b), &off_len) != 0 ||
+          on_len != off_len || on_len == 0 || on_len > sizeof(cur)) continue;
+      if (read_process_memory(pid, cand, cur, on_len) != 0) continue;
+      if (memcmp(cur, on_b, on_len) == 0 || memcmp(cur, off_b, on_len) == 0) return 1;
+    }
+  }
+  return 0;
+}
+
 /* Returns the first entry's offset from a mod's memory array, or 0 if unavailable. */
-static uint64_t
+uint64_t
 mc_mod_first_offset(cJSON *mc_mod) {
   cJSON *mem = cJSON_GetObjectItem(mc_mod, "memory");
   if (!cJSON_IsArray(mem) || cJSON_GetArraySize(mem) == 0) return 0;
@@ -1265,29 +1321,31 @@ apply_cheat_json(const char *title_id, int mod_index, int turn_on, char *err, si
 
   /* Master Code fixup setup (only when enabled in config) */
   int do_mc_fixup = 0;
+  int mc_fallback_available = 0;
   uint64_t mc_base_off = 0;
   uint8_t mc_on_bytes_buf[128]; size_t mc_on_len = 0;
   intptr_t mc_live_addr = 0;
   if (mc_fixup) {
-    cJSON *name_j_mc = cJSON_GetObjectItem(mod, "name");
-    const char *mstr = (cJSON_IsString(name_j_mc) && name_j_mc->valuestring) ? name_j_mc->valuestring : "";
-    if (mod_is_mc_dependent(mstr)) {
-      cJSON *mc_mod = find_master_code_mod_for(mods, mod_index);
-      if (mc_mod) {
-        mc_base_off = mc_mod_first_offset(mc_mod);
-        /* Also parse MC ON bytes for runtime scan */
-        cJSON *mc_mem0 = cJSON_GetObjectItem(mc_mod, "memory");
-        cJSON *mc_e0 = (cJSON_IsArray(mc_mem0) && cJSON_GetArraySize(mc_mem0) > 0)
-                       ? cJSON_GetArrayItem(mc_mem0, 0) : NULL;
-        if (mc_e0) {
-          cJSON *mc_on_j = cJSON_GetObjectItem(mc_e0, "on");
-          if (cJSON_IsString(mc_on_j) && mc_on_j->valuestring)
-            parse_hex_bytes_checked(mc_on_j->valuestring, mc_on_bytes_buf,
-                                    sizeof(mc_on_bytes_buf), &mc_on_len);
-        }
-        if (mc_base_off != 0) {
+    cJSON *mc_mod = find_master_code_mod_for(mods, mod_index);
+    if (mc_mod) {
+      mc_base_off = mc_mod_first_offset(mc_mod);
+      /* Also parse MC ON bytes for runtime scan */
+      cJSON *mc_mem0 = cJSON_GetObjectItem(mc_mod, "memory");
+      cJSON *mc_e0 = (cJSON_IsArray(mc_mem0) && cJSON_GetArraySize(mc_mem0) > 0)
+                     ? cJSON_GetArrayItem(mc_mem0, 0) : NULL;
+      if (mc_e0) {
+        cJSON *mc_on_j = cJSON_GetObjectItem(mc_e0, "on");
+        if (cJSON_IsString(mc_on_j) && mc_on_j->valuestring)
+          parse_hex_bytes_checked(mc_on_j->valuestring, mc_on_bytes_buf,
+                                  sizeof(mc_on_bytes_buf), &mc_on_len);
+      }
+      if (mc_base_off != 0) {
+        mc_live_addr = mod_base + (intptr_t)mc_base_off;
+        mc_fallback_available = 1;
+        cJSON *name_j_mc = cJSON_GetObjectItem(mod, "name");
+        const char *mstr = (cJSON_IsString(name_j_mc) && name_j_mc->valuestring) ? name_j_mc->valuestring : "";
+        if (mod_is_mc_dependent(mstr)) {
           do_mc_fixup = 1;
-          mc_live_addr = mod_base + (intptr_t)mc_base_off;
           cr_log("info", "cheats", "mc_fixup active mc_base_off=0x%llx mc_live=0x%lx mc_on_len=%zu dep='%s'",
                  (unsigned long long)mc_base_off, (long)mc_live_addr, mc_on_len, mstr);
         }
@@ -1518,10 +1576,27 @@ apply_cheat_json(const char *title_id, int mod_index, int turn_on, char *err, si
                  "entry[%d] address_ambiguous off=0x%llx; using relative addr=0x%lx title=%s mod=%d",
                  pre_n, (unsigned long long)off_u, (long)addr, title_id, mod_index);
         }
+        /* Name heuristic missed it — probe before trusting the naive address */
+        int mc_should_scan = do_mc_fixup;
+        if (!mc_should_scan && mc_fallback_available && !af &&
+            mc_live_addr > 0 && mc_on_len > 0 && off_len > 0 &&
+            on_len > 0 && on_len <= sizeof(cur_bytes)) {
+          if (read_process_memory(pid, addr, cur_bytes, on_len) == 0) {
+            int looks_on  = memcmp(cur_bytes, on_bytes, on_len) == 0;
+            int looks_off = memcmp(cur_bytes, off_bytes, on_len) == 0;
+            if (!looks_on && !looks_off) {
+              mc_should_scan = 1;
+              cr_log("info", "cheats",
+                     "mc_fallback_probe entry[%d] addr=0x%lx matches neither ON nor OFF — "
+                     "trying master-code-relative scan title=%s mod=%d",
+                     pre_n, (long)addr, title_id, mod_index);
+            }
+          }
+        }
         /* MC runtime scan: read the live MC region from process memory and search
          * for the dependent cheat's off bytes. Overrides addr if a match is found.
          * Returns 0 on read failure so addr stays at the normally-resolved value. */
-        if (do_mc_fixup && !af && mc_live_addr > 0 && mc_on_len > 0 && off_len > 0) {
+        if (mc_should_scan && !af && mc_live_addr > 0 && mc_on_len > 0 && off_len > 0) {
           intptr_t mc_scanned = 0;
           if (mc_scan_dep_addr(pid, mc_live_addr, mc_on_bytes_buf, mc_on_len,
                                off_bytes, off_len, mc_base_off, off_u_dep_raw,
@@ -1578,18 +1653,24 @@ apply_cheat_json(const char *title_id, int mod_index, int turn_on, char *err, si
                * allow_unsafe only, never allow_legacy (that one defaults on). */
               if (wlen >= 16) {
                 int _al_unsafe = (kind == 2) ? allow_unsafe_shn : allow_unsafe_mc4;
-                if (!_al_unsafe) {
+                if (!_al_unsafe && cave_has_verified_neighbor(mods, pid, mod_base, addr, 0x200)) {
+                  cr_log("warn", "cheats.mem",
+                         "cave_null_target_neighbor_verified entry[%d] addr=0x%lx — allowing, "
+                         "a nearby entry in this file is confirmed correct title=%s mod=%d",
+                         pre_n, (long)addr, title_id, mod_index);
+                } else if (!_al_unsafe) {
                   rc = -1;
                   snprintf(err, err_size,
                            "cave_null_target entry[%d] addr=0x%lx — cave target is null bytes, "
                            "address likely wrong for this title; update the cheat file",
                            pre_n, (long)addr);
                   break;
+                } else {
+                  cr_log("warn", "cheats.mem",
+                         "cave_null_target_bypassed entry[%d] addr=0x%lx len=%zu — null bytes at cave target, "
+                         "proceeding because allow_unsafe=1; address may be wrong title=%s mod=%d",
+                         pre_n, (long)addr, wlen, title_id, mod_index);
                 }
-                cr_log("warn", "cheats.mem",
-                       "cave_null_target_bypassed entry[%d] addr=0x%lx len=%zu — null bytes at cave target, "
-                       "proceeding because allow_unsafe=1; address may be wrong title=%s mod=%d",
-                       pre_n, (long)addr, wlen, title_id, mod_index);
               }
             }
           }

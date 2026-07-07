@@ -60,7 +60,7 @@
 #endif
 
 #ifndef CHEATRUNNER_VERSION
-#define CHEATRUNNER_VERSION "0.14"
+#define CHEATRUNNER_VERSION "0.15"
 #endif
 
 #define MAX_GAMES CR_APPDB_MAX_GAMES
@@ -188,12 +188,12 @@ http_send_response(int fd, int status, const char *content_type, const uint8_t *
                    "HTTP/1.1 %d %s\r\n"
                    "Content-Type: %s\r\n"
                    "Content-Length: %u\r\n"
-                   "Connection: close\r\n"
+                   "Connection: %s\r\n"
                    "Access-Control-Allow-Origin: *\r\n"
                    "Cache-Control: no-cache\r\n"
                    "\r\n",
                    status, status_text_for(status), content_type ? content_type : "application/octet-stream",
-                   (unsigned int)body_len);
+                   (unsigned int)body_len, g_http_keep_alive ? "keep-alive" : "close");
   if (n > 0) {
     if (socket_send_all(fd, header, (size_t)n) != 0) {
       return;
@@ -211,12 +211,12 @@ http_send_response_cached(int fd, int status, const char *content_type, const ui
                    "HTTP/1.1 %d %s\r\n"
                    "Content-Type: %s\r\n"
                    "Content-Length: %u\r\n"
-                   "Connection: close\r\n"
+                   "Connection: %s\r\n"
                    "Access-Control-Allow-Origin: *\r\n"
                    "Cache-Control: public, max-age=3600\r\n"
                    "\r\n",
                    status, status_text_for(status), content_type ? content_type : "application/octet-stream",
-                   (unsigned int)body_len);
+                   (unsigned int)body_len, g_http_keep_alive ? "keep-alive" : "close");
   if (n > 0) {
     if (socket_send_all(fd, header, (size_t)n) != 0) {
       return;
@@ -1101,7 +1101,7 @@ handle_appdb_icon(int fd, const char *query) {
     http_send_json(fd, 404, "{\"ok\":false,\"error\":\"no icon\"}");
     return;
   }
-  http_send_response(fd, 200, "image/png", buf, len);
+  http_send_response_cached(fd, 200, "image/png", buf, len);
   free(buf);
 }
 
@@ -1120,7 +1120,7 @@ handle_appdb_pic0(int fd, const char *query) {
     http_send_json(fd, 404, "{\"ok\":false,\"error\":\"no pic0\"}");
     return;
   }
-  http_send_response(fd, 200, "image/png", buf, len);
+  http_send_response_cached(fd, 200, "image/png", buf, len);
   free(buf);
 }
 
@@ -1873,6 +1873,41 @@ handle_api_cheats_state(int fd, const char *query) {
       int baseline_unknown = 0;
       int mismatch_logged = 0;
       int ff_hook = 0;
+      int any_mc_pending = 0;
+      int cross_inactive_matches = 0; /* off_matches caused only by another mod owning this cave/hook */
+
+      /* Master-code-dependent address correction, mirrors apply_cheat_json's lazy fallback. */
+      int mc_avail_st = 0;
+      int mc_pending_st = 0; /* 1 = this mod's mastercode is not active yet */
+      uint64_t mc_base_off_st = 0;
+      uint8_t mc_on_bytes_st[128]; size_t mc_on_len_st = 0;
+      intptr_t mc_live_addr_st = 0;
+      {
+        cJSON *mc_mod_st = find_master_code_mod_for(mods, mod_index);
+        if (mc_mod_st) {
+          mc_base_off_st = mc_mod_first_offset(mc_mod_st);
+          if (mc_base_off_st != 0) {
+            cJSON *mc_mem0_st = cJSON_GetObjectItem(mc_mod_st, "memory");
+            cJSON *mc_e0_st = (cJSON_IsArray(mc_mem0_st) && cJSON_GetArraySize(mc_mem0_st) > 0)
+                              ? cJSON_GetArrayItem(mc_mem0_st, 0) : NULL;
+            if (mc_e0_st) {
+              cJSON *mc_on_j_st = cJSON_GetObjectItem(mc_e0_st, "on");
+              if (cJSON_IsString(mc_on_j_st) && mc_on_j_st->valuestring)
+                parse_hex_bytes_checked(mc_on_j_st->valuestring, mc_on_bytes_st, sizeof(mc_on_bytes_st), &mc_on_len_st);
+            }
+            mc_live_addr_st = mod_base_st + (intptr_t)mc_base_off_st;
+            mc_avail_st = (mc_on_len_st > 0);
+            if (mc_avail_st) {
+              uint8_t mc_cur_st[128];
+              if (read_process_memory(pid, mc_live_addr_st, mc_cur_st, mc_on_len_st) != 0 ||
+                  memcmp(mc_cur_st, mc_on_bytes_st, mc_on_len_st) != 0) {
+                mc_pending_st = 1;
+              }
+            }
+          }
+        }
+      }
+
       cJSON *m = NULL;
       cJSON_ArrayForEach(m, mem) {
         if (state != CHEAT_STATE_UNKNOWN) break;
@@ -1956,6 +1991,19 @@ handle_api_cheats_state(int fd, const char *query) {
         /* For MC4/SHN without explicit expected bytes, off_b is NOT a reliable original */
         int off_reliable = (cheat_kind == 1) || (exp_len > 0);
         int is_off = off_reliable && (memcmp(cur, (exp_len > 0 ? exp_b : off_b), on_len) == 0);
+        /* Neither matched at the naive address — retry via the master-code scan
+         * before treating this as a mismatch (mirrors apply_cheat_json). */
+        if (!is_on && !is_off && mc_avail_st && off_len > 0 && !af_s) {
+          intptr_t mc_scanned = 0;
+          if (mc_scan_dep_addr(pid, mc_live_addr_st, mc_on_bytes_st, mc_on_len_st,
+                               off_b, off_len, mc_base_off_st, off_u, &mc_scanned) &&
+              mc_scanned != addr &&
+              read_process_memory(pid, mc_scanned, cur, on_len) == 0) {
+            addr = mc_scanned;
+            is_on = memcmp(cur, on_b, on_len) == 0;
+            is_off = off_reliable && (memcmp(cur, (exp_len > 0 ? exp_b : off_b), on_len) == 0);
+          }
+        }
         /* Another mod claimed this address (cave/JMP redirect) — treat as OFF, not mismatch, for mutually-exclusive cheats. */
         int cross_mod_inactive = 0;
         if (!is_on && !is_off && off_reliable) {
@@ -1970,15 +2018,24 @@ handle_api_cheats_state(int fd, const char *query) {
         }
         if (is_off || cross_mod_inactive) {
           off_matches++;
+          if (cross_mod_inactive) cross_inactive_matches++;
         }
+        /* Its own mastercode isn't active yet — the address doesn't hold real
+         * game state, so this isn't a reliable mismatch, just an unconfirmed baseline. */
+        int mc_dep_pending = mc_avail_st && mc_pending_st;
         if (!is_on && !is_off && !cross_mod_inactive && off_reliable) {
-          mismatch++;
-          if (on_len > 0 && on_len < 16) {
-            int all_ff = 1;
-            for (size_t _bz = 0; _bz < on_len; _bz++) {
-              if (cur[_bz] != 0xFF) { all_ff = 0; break; }
+          if (mc_dep_pending) {
+            baseline_unknown++;
+            any_mc_pending = 1;
+          } else {
+            mismatch++;
+            if (on_len > 0 && on_len < 16) {
+              int all_ff = 1;
+              for (size_t _bz = 0; _bz < on_len; _bz++) {
+                if (cur[_bz] != 0xFF) { all_ff = 0; break; }
+              }
+              if (all_ff) ff_hook++;
             }
-            if (all_ff) ff_hook++;
           }
         }
         if (!is_on && !off_reliable) {
@@ -1989,7 +2046,7 @@ handle_api_cheats_state(int fd, const char *query) {
             baseline_unknown++;
           }
         }
-        if (!is_on && !is_off && !cross_mod_inactive && off_reliable) {
+        if (!is_on && !is_off && !cross_mod_inactive && off_reliable && !mc_dep_pending) {
           if (!mismatch_logged) {
             char cur_hex[512], on_hex[128], exp_hex[128], addr_hex[32], off_hex_addr[32];
             bytes_to_hex(cur, on_len > 32 ? 32 : on_len, cur_hex, sizeof(cur_hex));
@@ -2065,6 +2122,12 @@ handle_api_cheats_state(int fd, const char *query) {
       if (state == CHEAT_STATE_UNKNOWN) {
         if (on_matches == total && total > 0) {
           state = CHEAT_STATE_ON;
+        } else if (on_matches > 0 && total > 0 && on_matches + cross_inactive_matches == total &&
+                   off_matches == cross_inactive_matches && mismatch == 0 &&
+                   baseline_unknown == 0 && off_val_matches == 0) {
+          /* Remaining entries are cave/hook space now owned by another active mod
+           * (e.g. this mastercode's own dependents writing into its cave) — still ON. */
+          state = CHEAT_STATE_ON;
         } else if (mismatch > 0 && baseline_unknown == 0 && on_matches == 0 &&
                    off_matches == 0 && off_val_matches == 0) {
           /* All patches have reliable baseline and none match — true version mismatch */
@@ -2082,7 +2145,9 @@ handle_api_cheats_state(int fd, const char *query) {
         } else if (baseline_unknown > 0 && mismatch == 0 && on_matches == 0) {
           /* No ON matches, no reliable mismatches — not applied either way, so report BASELINE_UNKNOWN not MIXED. */
           state = CHEAT_STATE_BASELINE_UNKNOWN;
-          reason = "MC4/SHN: no reliable original bytes; state cannot be confirmed";
+          reason = any_mc_pending
+            ? "requires Master Code to be enabled first"
+            : "MC4/SHN: no reliable original bytes; state cannot be confirmed";
         } else {
           state = CHEAT_STATE_MIXED;
           reason = ff_hook > 0
@@ -4413,11 +4478,11 @@ http_send_png_asset(int fd) {
     "HTTP/1.1 200 OK\r\n"
     "Content-Type: image/png\r\n"
     "Content-Length: %u\r\n"
-    "Connection: close\r\n"
+    "Connection: %s\r\n"
     "Access-Control-Allow-Origin: *\r\n"
     "Cache-Control: public, max-age=86400\r\n"
     "\r\n",
-    (unsigned int)len);
+    (unsigned int)len, g_http_keep_alive ? "keep-alive" : "close");
   if (n > 0) {
     if (socket_send_all(fd, header, (size_t)n) != 0) {
       return;

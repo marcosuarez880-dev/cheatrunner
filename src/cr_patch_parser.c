@@ -967,14 +967,18 @@ patch_parse_xml_file(const char *xml_path, const char *title_id,
                 char addr_str[1024] = {0};
                 char val_str[512]   = {0};
                 char off_str[16]    = {0};
+                char target_str[512] = {0};
+                char size_str[16]   = {0};
                 tag_attr(line_open, line_end, "Type",    type_str, sizeof(type_str));
                 tag_attr(line_open, line_end, "Address", addr_str, sizeof(addr_str));
                 tag_attr(line_open, line_end, "Value",   val_str,  sizeof(val_str));
                 tag_attr(line_open, line_end, "Offset",  off_str,  sizeof(off_str));
+                tag_attr(line_open, line_end, "Target",  target_str, sizeof(target_str));
+                tag_attr(line_open, line_end, "Size",    size_str, sizeof(size_str));
 
                 patch_line_type_t lt = type_from_str(type_str);
 
-                if (lt == PATCH_LINE_MASK_JUMP32 || lt == PATCH_LINE_UNKNOWN) {
+                if (lt == PATCH_LINE_UNKNOWN) {
                     e->has_unsupported = 1;
                     e->unsupported_count++;
                     /* Collect unique unsupported type names */
@@ -1001,6 +1005,34 @@ patch_parse_xml_file(const char *xml_path, const char *title_id,
                     if (plen < 0) { lp = line_end + 2; continue; }
                     ln->pattern_len  = (size_t)plen;
                     ln->match_offset = off_str[0] ? atoi(off_str) : 0;
+                    uint8_t vbuf[PATCH_LINE_MAX_BYTES];
+                    size_t  vlen = 0;
+                    if (parse_hex_bytes(val_str, vbuf, &vlen, PATCH_LINE_MAX_BYTES) != 0 || vlen == 0) {
+                        lp = line_end + 2; continue;
+                    }
+                    ln->value_len = vlen;
+                    memcpy(ln->value, vbuf, vlen);
+                } else if (lt == PATCH_LINE_MASK_JUMP32) {
+                    /* Detour trampoline: Address/Offset locate the hook site (same
+                     * pattern-scan as mask); Target locates the cave via a second,
+                     * independent scan; Value is the code/data written into the cave,
+                     * not a direct write at the hook site. */
+                    if (!target_str[0]) { lp = line_end + 2; continue; }
+                    int plen = parse_mask_pattern(addr_str, ln->pattern, ln->wildcard,
+                                                  PATCH_MASK_MAX_BYTES);
+                    if (plen < 0) { lp = line_end + 2; continue; }
+                    ln->pattern_len  = (size_t)plen;
+                    ln->match_offset = off_str[0] ? atoi(off_str) : 0;
+
+                    int tlen = parse_mask_pattern(target_str, ln->target_pattern,
+                                                  ln->target_wildcard, PATCH_MASK_MAX_BYTES);
+                    if (tlen < 0) { lp = line_end + 2; continue; }
+                    ln->target_pattern_len = (size_t)tlen;
+
+                    ln->jump_size = size_str[0] ? atoi(size_str) : 5;
+                    /* rel32 JMP needs >=5 bytes; cap at the NOP-pad buffer size used when applying. */
+                    if (ln->jump_size < 5 || ln->jump_size > PATCH_LINE_MAX_BYTES) { lp = line_end + 2; continue; }
+
                     uint8_t vbuf[PATCH_LINE_MAX_BYTES];
                     size_t  vlen = 0;
                     if (parse_hex_bytes(val_str, vbuf, &vlen, PATCH_LINE_MAX_BYTES) != 0 || vlen == 0) {
@@ -1195,6 +1227,100 @@ patch_apply_entry_ex(const char *title_id, const patch_entry_t *entry,
     for (int i = 0; i < entry->line_count; i++) {
         const patch_line_t *ln = &entry->lines[i];
         intptr_t write_addr = 0;
+
+        if (ln->type == PATCH_LINE_MASK_JUMP32) {
+            /* Detour trampoline: hook site (Address+Offset) gets redirected via a
+             * JMP into a cave (Target); the cave holds Value followed by a JMP
+             * back to just past the hooked bytes. Three independent writes, each
+             * with its own backup so rollback still restores everything. */
+            intptr_t patch_match = scan_for_pattern(pid, base, MASK_SCAN_LIMIT,
+                                                    ln->pattern, ln->wildcard, ln->pattern_len);
+            if (!patch_match) {
+                snprintf(err_code, sizeof(err_code), "mask_jump32_addr_not_found");
+                snprintf(err_msg,  sizeof(err_msg),
+                         "line[%d] Address pattern not found in game memory", i);
+                cr_log("warn", "patches", "mask_jump32 addr_not_found line=%d title=%s", i, title_id);
+                rc = -1; break;
+            }
+            intptr_t patch_addr = patch_match + (intptr_t)ln->match_offset;
+
+            intptr_t cave_addr = scan_for_pattern(pid, base, MASK_SCAN_LIMIT,
+                                                  ln->target_pattern, ln->target_wildcard,
+                                                  ln->target_pattern_len);
+            if (!cave_addr) {
+                snprintf(err_code, sizeof(err_code), "mask_jump32_target_not_found");
+                snprintf(err_msg,  sizeof(err_msg),
+                         "line[%d] Target pattern not found in game memory", i);
+                cr_log("warn", "patches", "mask_jump32 target_not_found line=%d title=%s", i, title_id);
+                rc = -1; break;
+            }
+            intptr_t cave_end = cave_addr + (intptr_t)ln->value_len;
+
+            cr_log("info", "patches",
+                   "mask_jump32 patch_addr=0x%lx cave_addr=0x%lx cave_end=0x%lx jump_size=%d value_len=%zu title=%s",
+                   (long)patch_addr, (long)cave_addr, (long)cave_end, ln->jump_size, ln->value_len, title_id);
+
+            struct { intptr_t addr; const uint8_t *data; size_t len; } writes[3];
+            uint8_t jmp_back[5];
+            uint8_t jmp_in[PATCH_LINE_MAX_BYTES];
+            {
+                int32_t rel = (int32_t)((intptr_t)(patch_addr + ln->jump_size) - (intptr_t)(cave_end + 5));
+                jmp_back[0] = 0xE9;
+                memcpy(jmp_back + 1, &rel, 4);
+            }
+            {
+                memset(jmp_in, 0x90, (size_t)ln->jump_size);
+                int32_t rel = (int32_t)((intptr_t)cave_addr - (intptr_t)(patch_addr + 5));
+                jmp_in[0] = 0xE9;
+                memcpy(jmp_in + 1, &rel, 4);
+            }
+            writes[0].addr = cave_addr;  writes[0].data = ln->value; writes[0].len = ln->value_len;
+            writes[1].addr = cave_end;   writes[1].data = jmp_back;  writes[1].len = sizeof(jmp_back);
+            writes[2].addr = patch_addr; writes[2].data = jmp_in;    writes[2].len = (size_t)ln->jump_size;
+
+            int wfail = 0;
+            for (int w = 0; w < 3 && !wfail; w++) {
+                if (backup_count >= PATCH_MAX_LINES) {
+                    snprintf(err_code, sizeof(err_code), "backup_capacity");
+                    snprintf(err_msg,  sizeof(err_msg), "line[%d] ran out of backup slots", i);
+                    rc = -1; wfail = 1; break;
+                }
+                int rrc = mdbg_io_copyout(pid, writes[w].addr, backups[backup_count].old_bytes, writes[w].len);
+                if (rrc < 0) {
+                    snprintf(err_code, sizeof(err_code), "backup_read_failed");
+                    snprintf(err_msg,  sizeof(err_msg),
+                             "line[%d] failed to read original bytes at 0x%lx", i, (long)writes[w].addr);
+                    rc = -1; wfail = 1; break;
+                }
+                backups[backup_count].address = (uint64_t)writes[w].addr;
+                backups[backup_count].len     = writes[w].len;
+                backups[backup_count].valid   = 1;
+                backup_count++;
+
+                int wrc = write_process_memory_forced(pid, writes[w].addr, writes[w].data, writes[w].len);
+                if (wrc != 0) {
+                    snprintf(err_code, sizeof(err_code), "write_failed");
+                    snprintf(err_msg,  sizeof(err_msg),
+                             "line[%d] mask_jump32 write %d/3 failed at 0x%lx (rc=%d)",
+                             i, w + 1, (long)writes[w].addr, wrc);
+                    rc = -1; wfail = 1; break;
+                }
+                uint8_t vbuf[PATCH_LINE_MAX_BYTES];
+                if (mdbg_io_copyout(pid, writes[w].addr, vbuf, writes[w].len) >= 0 &&
+                    memcmp(vbuf, writes[w].data, writes[w].len) != 0) {
+                    cr_log("warn", "patches", "mask_jump32_verify_mismatch write=%d/3 addr=0x%lx len=%zu",
+                           w + 1, (long)writes[w].addr, writes[w].len);
+                    snprintf(err_code, sizeof(err_code), "verify_failed");
+                    snprintf(err_msg,  sizeof(err_msg),
+                             "line[%d] mask_jump32 write %d/3 verify mismatch at 0x%lx",
+                             i, w + 1, (long)writes[w].addr);
+                    verify_fails++;
+                    rc = -1; wfail = 1; break;
+                }
+            }
+            if (wfail) break;
+            continue;
+        }
 
         if (ln->type == PATCH_LINE_MASK) {
             cr_log("info", "patches", "mask_scan pattern_len=%zu offset=%d title=%s",

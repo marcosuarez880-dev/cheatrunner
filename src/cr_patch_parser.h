@@ -43,6 +43,12 @@ typedef struct {
     uint8_t   wildcard[PATCH_MASK_MAX_BYTES]; /* 1 = '??' byte */
     size_t    pattern_len;
     int       match_offset;  /* byte offset from pattern match start to write site */
+    /* mask_jump32 only: detour trampoline — Address/Offset above locate the hook
+     * site; these locate the cave (a second, independent pattern scan). */
+    uint8_t   target_pattern[PATCH_MASK_MAX_BYTES];
+    uint8_t   target_wildcard[PATCH_MASK_MAX_BYTES];
+    size_t    target_pattern_len;
+    int       jump_size;     /* bytes overwritten at the hook site with JMP+NOP pad, >=5 */
 } patch_line_t;
 
 typedef struct {
