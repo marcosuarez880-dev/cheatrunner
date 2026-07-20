@@ -65,8 +65,9 @@ cr_priv_init(void) {
     }
   }
 
-  uint64_t attrs = kernel_get_ucred_attrs(mypid);
-  g_priv.attrs_ok = ((attrs & 0x80) != 0);
+  uint8_t attrs[32] = {0};
+  kernel_get_ucred_attrs(mypid, attrs);
+  g_priv.attrs_ok = ((attrs[3] & 0x80) != 0); /* ptrace attribute, see sdk-master crt/patch.c */
 
   if (g_priv.authid_ok && g_priv.caps_ok && g_priv.attrs_ok) {
     printf("[priv] sce auth/caps ok authid=0x%llx\n", (unsigned long long)g_priv.authid);
