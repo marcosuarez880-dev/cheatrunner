@@ -1,27 +1,49 @@
 # CheatRunner — Changelog
 
-## v0.15
+## v0.16
 
+ **Removed the "Disable All Patches" button.** It disabled patches for every game on the console at once, which was confusing and easy to trigger by accident. Patches now enable/disable per-entry only, the same as cheats.
+- **Fixed: "CheatRunner is not responding" errors reported by several users.** Root cause: HTTP keep-alive (added late in v0.15) held connections open far longer than before, and the PS5 browser doesn't reuse them the way keep-alive expects — this could exhaust the concurrent-connection limit under normal polling. Reverted back to closing each connection after one request.
+- **Added a setting to disable the home-screen tile auto-install** (Settings → System). On by default, matching the existing behavior.
+- **Fixed: "Download Cheats" searches could fail with "Request timed out"** even when the search was still completing fine in the background — a single flaky status check no longer cancels the whole search.
+- **Raised the HTTP server's connection backlog** (8 → 32) to reduce refused connections during bursts of simultaneous requests.
+- **Reorganized the Repositories tab layout** for clarity, and fixed its progress bar/result colors not respecting the active theme.
+- **The Repositories tab now shows which files failed to verify after a bulk download**, plus when the last download finished.
+- **Added a "Reset to Auto" button for the fan-on threshold** (Thermals & Fan panel) — clears a pinned threshold and lets the console's automatic fan curve take back over.
+- **Fixed a DNS resolution security weakness.** Query IDs were predictable, and the socket wasn't restricted to the server it queried, both making responses easier to spoof.
+- **Dashboard now serves gzip-compressed HTML/CSS/JS** when the browser supports it — faster page loads, especially on the PS5 browser.
+- **Added cheat autoload profiles.** Save your currently-enabled cheats for a game as a profile, and CheatRunner automatically re-applies them the next time that game launches, with an on-screen notification when it fires.
+- **Replaced "Copy Cheat Debug" and "Copy Diagnostic Bundle" with a single "Copy Logs" button** in the trainer modal, matching the one already on the Logs panel.
+- **Added patch autoload profiles.** Save your currently-applied patches for a game as a profile, and CheatRunner automatically re-applies them the next time that game launches, same as cheat autoload profiles.
+- **Added an "Autoload" badge on game tiles** for titles with a saved cheat and/or patch autoload profile, so you can tell at a glance without opening the trainer.
+- **Patch autoload now always finishes before cheat autoload starts** on game launch (previously both fired at the same time), so cheats that depend on a patched code path never race against the patch itself.
+
+<details>
+<summary><b>v0.15</b></summary>
+
+- **Added `mask_jump32` patch support.** Previously parsed but always skipped as unsupported, silently no-op'ing several real patches (multiple "60 FPS"/"Resolution Patch" entries).
 - **Added a "Switch to Max Compatibility" prompt** when a cheat fails to enable due to an unverifiable address. Doesn't change any defaults — only offers the existing preset at the moment it would help.
 - **Added trainer author credits** to the cheat menu ("Cheats By") for JSON, SHN, and MC4 files.
 - **Fixed:** SHN/MC4 game names with an apostrophe (e.g. "Assassin's Creed") were truncated in the cheat menu.
 - **Fixed:** cheats depending on a "Master Code" mod could resolve to the wrong address and fail silently, including a case where a dependent's own name confused master-code detection. Also fixes the dashboard's MISMATCH badge showing incorrectly for these cheats.
-- **Fixed:** cheat/patch writes silently failed on firmwares 12.xx.
+- **Fixed:** cheat/patch writes silently failed on firmware newer than 12.00.
 - **Fixed:** some valid cheats sharing a code-cave block with other mods were wrongly blocked as "wrong address."
 - **Fixed:** cheat entries with a dropped leading hex zero (e.g. `"1"` instead of `"01"`) failed to parse and silently did nothing.
 - **Added a network watchdog** that recovers faster after sleep/wake or Wi-Fi reconnects, and notifies you when the console's IP changes.
 - **Added an OLED theme** — true black background and panels, and noticeably less glow/decorative lines than the default Dark theme.
 - **Session logs are now saved to `/data/cheatrunner/logs.txt`**, not just kept in memory — makes it possible to check what happened after a crash or a restart wiped the in-app log view.
-- **Fixed: "Shutdown Payload" could silently hang forever** instead of shutting down CheatRunner, if a cheat apply was stuck at the exact moment shutdown was requested. Shutdown now always completes within a couple seconds either way.
+- **Fixed: "Shutdown Payload" could silently hang forever** instead of closing CheatRunner, if a cheat apply was stuck at the exact moment shutdown was requested. Shutdown now always completes within a couple seconds either way.
 - **Enlarged the header logo** and made its glow match the active theme's color instead of always being red.
-- **Fixed:** the Cheats/Repositories/Patches tabs in the trainer modal could render as oversized buttons on the PS5 browser.
+- **Fixed:** the Cheats/Repositories/Patches tabs in the trainer modal could render as squashed, oversized capsules on the PS5 browser.
+- Attempted fix for a PS5-browser-only bug where the trainer modal's Patches/Repositories lists couldn't be scrolled down to reach lower content — improved but not fully confirmed resolved on hardware yet.
 - **Fixed:** a Master Code cheat could show a false "Conflicts with active mod" against its own dependent, blocking it from being enabled, when the dependent's own name also mentioned "Master Code."
 - **Fixed:** cheats that require a Master Code showed a confusing "VERSION MISMATCH" (and couldn't be toggled) before the Master Code was enabled — now shows a clear "requires Master Code first" state instead.
 - **Fixed:** a Master Code's own button showed a false "PARTIAL PATCH" once its dependent cheats were enabled and writing into its shared cave, even though everything was working correctly.
-- **Fixed:** the Settings popup could fail to open/render on the PS5 browser the same way the trainer modal did.
+- **Fixed:** the Settings popup could fail to open/render on the PS5 browser the same way the trainer modal did — it was missing a fix already applied elsewhere.
 - **Game icons are now cached by the browser** instead of being re-downloaded every time the dashboard loads — faster repeat loads, especially on the PS5 browser.
-- **Added HTTP keep-alive**, so the dashboard's background polling reuses one connection instead of opening a new one for every single request.
 - **Settings theme dropdown now shows proper names** ("Dark", "Crimson", "Midnight", "OLED") instead of raw internal values.
+
+</details>
 
 <details>
 <summary><b>v0.14</b></summary>

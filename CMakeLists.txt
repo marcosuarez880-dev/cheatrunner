@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.10)
 
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 
-project(CheatRunnerPayload C)
-set(CHEATRUNNER_VERSION "0.15")
+project(CheatRunnerPayload C CXX)
+set(CHEATRUNNER_VERSION "0.16")
 
 # Embed CheatRunner.png as a C byte array (cheatrunner_png.h in build dir).
 # If the asset is missing, generate a tiny fallback icon so builds still work.
@@ -48,7 +48,26 @@ else()
   message(STATUS "CheatRunner tile PKG: dist/CheatRunner.pkg not found — auto-install disabled (run pkg-source/build-pkg.sh first)")
 endif()
 
-file(GLOB CHEATRUNNER_SRC CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c")
+# Gzip-compress the dashboard assets at build time on the host (real zlib,
+# not available in the target SDK) and embed the finished bytes — the PS5
+# binary just serves them, it never compresses anything itself.
+foreach(_ASSET html css js)
+  execute_process(
+    COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_gzip_header.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/dashboard_${_ASSET}.inc"
+            "${CMAKE_CURRENT_BINARY_DIR}/dashboard_${_ASSET}_gz.h"
+            "g_dashboard_${_ASSET}_gz"
+    RESULT_VARIABLE _GZ_RC
+  )
+  if(NOT _GZ_RC EQUAL 0)
+    message(FATAL_ERROR "Failed to gzip-compress dashboard_${_ASSET}.inc for embedding")
+  endif()
+endforeach()
+
+file(GLOB CHEATRUNNER_SRC CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+)
 
 add_executable(CheatRunner
   ${CHEATRUNNER_SRC}

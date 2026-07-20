@@ -69,13 +69,13 @@ Runtime cheat memory writes can crash the game, break a session, corrupt your sa
 - ON/OFF trainer toggles where supported.
 - Runtime restore where possible.
 - Crash-suspect detection — mods that crash the game are flagged and blocked from re-enabling automatically; suspects persist across CheatRunner restarts.
+- Autoload profiles — save your currently-enabled cheats and/or currently-applied patches for a game, and CheatRunner re-applies them automatically the next time that game launches, with an on-screen notification.
 - Version-aware cheat selection with candidate selector and manual override.
 - Per-title address mode override (Auto / Absolute / Relative) for SHN and MC4 files.
 - Address learning cache — resolved SHN/MC4 addresses reused on subsequent applies.
 - Settings panel — address resolution, safety timers, log level, and advanced toggles, all configurable from the dashboard, with one-click presets (Safe / Max Compatibility / Debug), live search, reset-to-defaults, and a dark theme picker.
 - Config hot-reload — edits to `config.ini` on the PS5 (FTP/SSH) are picked up automatically within ~500 ms, no restart required.
-- Logs panel.
-- Copy Logs / Copy Cheat Debug / Copy Diagnostic Bundle.
+- Logs panel with a Copy Logs button.
 - Shutdown Payload button for testing and cleanup.
 
 ---
@@ -150,9 +150,7 @@ Some cheats may:
 
 When reporting bugs, include:
 
-- CheatRunner logs;
-- Copy Cheat Debug output;
-- Copy Diagnostic Bundle output if available;
+- CheatRunner logs (Copy Logs button);
 - game title ID;
 - game version/update;
 - cheat file used;
@@ -219,6 +217,30 @@ Patch search paths (scanned in this order):
 /data/cheatrunner/patches/xml            ← PS4 BC / general patches
 /data/elf-arsenal/patches/xml            ← elf-arsenal cross-compatibility
 ```
+
+---
+
+## 🔁 Autoload Profiles
+
+Autoload profiles let CheatRunner automatically re-apply your cheats and/or patches every time you launch a game — no need to open the dashboard and toggle them on again.
+
+**Important:** an autoload profile only saves the cheats/patches that are **currently ON/applied at the moment you save it**. It does not save the whole cheat or patch file — only the specific mods you had turned on, or the specific patches you had applied, at that time.
+
+### Setting up autoload for cheats
+
+1. Open a game's trainer from the dashboard and enable the cheats you want.
+2. Go to the **Cheats** tab and click **Save Autoload Profile**.
+3. Next time you launch that game, CheatRunner automatically re-applies those same cheats and shows an on-screen notification.
+4. To stop autoloading, open the Cheats tab again and click **Clear Autoload Profile**.
+
+### Setting up autoload for patches
+
+1. Open a game's trainer from the dashboard and apply the patches you want.
+2. Go to the **Patches** tab and click **Save Autoload Profile**.
+3. Next time you launch that game, CheatRunner automatically re-applies those same patches and shows an on-screen notification.
+4. To stop autoloading, open the Patches tab again and click **Clear Autoload Profile**.
+
+Cheat and patch autoload profiles are independent — you can save one, both, or neither for any given game.
 
 ---
 
