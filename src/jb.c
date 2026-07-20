@@ -55,7 +55,14 @@ jb_escalate_pid(pid_t pid) {
   if (kernel_set_ucred_caps(pid, caps) != 0) {
     rc = -1;
   }
-  if (kernel_set_ucred_attrs(pid, 0x80) != 0) {
+
+  uint8_t attrs[32];
+  if (kernel_get_ucred_attrs(pid, attrs) == 0) {
+    attrs[3] |= 0x80; /* ptrace */
+    if (kernel_set_ucred_attrs(pid, attrs) != 0) {
+      rc = -1;
+    }
+  } else {
     rc = -1;
   }
 

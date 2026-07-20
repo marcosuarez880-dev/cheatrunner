@@ -100,6 +100,65 @@ free_merged(merged_patches_t *m) {
     free(m);
 }
 
+int
+patch_apply_by_entry_id(const char *title_id, const char *entry_id, int force,
+                        char *err, size_t err_size) {
+    merged_patches_t *m = build_merged_patches(title_id);
+    if (!m) { snprintf(err, err_size, "oom"); return -1; }
+    if (m->count == 0) {
+        free_merged(m);
+        snprintf(err, err_size, "patch_not_found");
+        return -1;
+    }
+
+    patch_entry_t *e = NULL;
+    for (int i = 0; i < m->count; i++) {
+        if (strcmp(m->entries[i].entry_id, entry_id) == 0) { e = &m->entries[i]; break; }
+    }
+    if (!e) {
+        free_merged(m);
+        snprintf(err, err_size, "entry_not_found");
+        return -1;
+    }
+    if (e->line_count == 0) {
+        free_merged(m);
+        snprintf(err, err_size, "no_supported_lines");
+        return -1;
+    }
+    if (e->has_unsupported) {
+        free_merged(m);
+        snprintf(err, err_size, "unsupported_line_type");
+        return -1;
+    }
+
+    if (!force && !e->is_mask_ver && e->app_ver[0]) {
+        running_game_state_t apply_st;
+        running_state_get(&apply_st);
+        char game_ver[32] = {0};
+        if (apply_st.running) {
+            const char *ver = apply_st.content_version[0] ? apply_st.content_version
+                                                           : apply_st.app_version;
+            if (ver[0]) snprintf(game_ver, sizeof(game_ver), "%s", ver);
+        }
+        if (game_ver[0] && !cr_version_equal(e->app_ver, game_ver)) {
+            free_merged(m);
+            snprintf(err, err_size, "version_mismatch");
+            return -1;
+        }
+    }
+
+    patch_apply_result_t res;
+    int rc = patch_apply_entry_ex(title_id, e, &res);
+    if (rc != 0) {
+        snprintf(err, err_size, "%s", res.error[0] ? res.error : "apply_failed");
+        free_merged(m);
+        return -1;
+    }
+    patch_mark_applied(title_id, e->entry_id, res.pid);
+    free_merged(m);
+    return 0;
+}
+
 /* ── /api/patches?titleId=CUSA00900 ─────────────────────────────────────── */
 
 static void
@@ -541,28 +600,6 @@ cr_api_patches_handle(int fd, const char *method, const char *path,
     }
     if (strcmp(path, "/api/patches/files/delete") == 0) {
         handle_patches_files_delete(fd, query);
-        return 1;
-    }
-    /* /api/patches/global — returns current enabled state */
-    if (strcmp(path, "/api/patches/global") == 0) {
-        char body[64];
-        snprintf(body, sizeof(body), "{\"ok\":true,\"enabled\":%s}",
-                 patch_global_enabled() ? "true" : "false");
-        http_send_json(fd, 200, body);
-        return 1;
-    }
-    /* /api/patches/global/set?on=0|1 — enable or disable all patch dirs at once */
-    if (strcmp(path, "/api/patches/global/set") == 0) {
-        char on_s[8] = {0};
-        if (query_value(query, "on", on_s, sizeof(on_s)) != 0) {
-            http_send_json(fd, 400, "{\"ok\":false,\"error\":\"missing on\"}");
-            return 1;
-        }
-        patch_global_set(atoi(on_s));
-        char body[64];
-        snprintf(body, sizeof(body), "{\"ok\":true,\"enabled\":%s}",
-                 patch_global_enabled() ? "true" : "false");
-        http_send_json(fd, 200, body);
         return 1;
     }
     return 0;

@@ -25,7 +25,6 @@
 static volatile int g_http_listen_notified = 0;
 char g_listen_ip[64] = "127.0.0.1";
 int g_http_listen_fd = -1;
-_Thread_local int g_http_keep_alive = 0;
 
 #define HTTP_MAX_CONCURRENT 24
 static volatile int  g_active_clients = 0;
@@ -129,6 +128,25 @@ parse_content_length_header(const char *headers) {
   return (size_t)v;
 }
 
+static int
+request_accepts_gzip(const char *headers) {
+  if (!headers || !headers[0]) {
+    return 0;
+  }
+  const char *line = strcasestr(headers, "Accept-Encoding:");
+  if (!line) {
+    return 0;
+  }
+  const char *eol = strpbrk(line, "\r\n");
+  size_t line_len = eol ? (size_t)(eol - line) : strlen(line);
+  for (size_t i = 0; i + 4 <= line_len; i++) {
+    if (strncasecmp(line + i, "gzip", 4) == 0) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 static void
 http_send_json(int fd, int status, const char *body) {
   const char *payload = body ? body : "{\"ok\":false}";
@@ -137,12 +155,11 @@ http_send_json(int fd, int status, const char *body) {
                    "HTTP/1.1 %d OK\r\n"
                    "Content-Type: application/json\r\n"
                    "Content-Length: %u\r\n"
-                   "Connection: %s\r\n"
+                   "Connection: close\r\n"
                    "Access-Control-Allow-Origin: *\r\n"
                    "Cache-Control: no-cache\r\n"
                    "\r\n",
-                   status, (unsigned int)strlen(payload),
-                   g_http_keep_alive ? "keep-alive" : "close");
+                   status, (unsigned int)strlen(payload));
   if (n > 0) {
     (void)socket_send_all(fd, header, (size_t)n);
     (void)socket_send_all(fd, payload, strlen(payload));
@@ -168,142 +185,126 @@ http_grow_buf(char **buf, size_t *cap, size_t need) {
 static void
 http_handle_client(int fd, const char *client_ip) {
   /* Most requests (polling, toggles) are a few KB — start small and grow only
-   * for the rare large upload, instead of malloc'ing MAX_REQ_SIZE every time.
-   * The buffer is reused across requests on a kept-alive connection. */
+   * for the rare large upload, instead of malloc'ing MAX_REQ_SIZE every time. */
   size_t cap = 65536;
   char *req = malloc(cap + 1);
   if (!req) {
     http_send_json(fd, 500, "{\"ok\":false,\"error\":\"alloc\"}");
     return;
   }
+  size_t off = 0;
+  size_t body_len = 0;
 
   struct timeval tv;
-  tv.tv_sec = 20;
+  tv.tv_sec = 10;
   tv.tv_usec = 0;
   setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
   setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
   for (;;) {
-    size_t off = 0;
-    size_t body_len = 0;
-
-    for (;;) {
-      if (off >= MAX_REQ_SIZE) {
-        break;
-      }
-      if (off >= cap && http_grow_buf(&req, &cap, off + 1) != 0) {
-        http_send_json(fd, 500, "{\"ok\":false,\"error\":\"alloc\"}");
-        free(req);
-        return;
-      }
-      int n = recv(fd, req + off, cap - off, 0);
-      if (n <= 0) {
-        if (n < 0 && errno == EINTR) {
-          continue;
-        }
-        /* Peer closed, or idle timeout waiting for the next request on a
-         * kept-alive connection — either way, nothing more to do here. */
-        free(req);
-        return;
-      }
-      off += (size_t)n;
-      req[off] = '\0';
-      if (strstr(req, "\r\n\r\n") || strstr(req, "\n\n")) {
-        break;
-      }
+    if (off >= MAX_REQ_SIZE) {
+      break;
     }
-    if (off == 0) {
-      free(req);
-      return;
-    }
-
-    char *headers_end = strstr(req, "\r\n\r\n");
-    size_t sep_len = 4;
-    if (!headers_end) {
-      headers_end = strstr(req, "\n\n");
-      sep_len = 2;
-    }
-    if (!headers_end) {
-      http_send_json(fd, 400, "{\"ok\":false,\"error\":\"bad request\"}");
-      free(req);
-      return;
-    }
-
-    size_t header_bytes = (size_t)(headers_end - req);
-    req[header_bytes] = '\0';
-    size_t already_body = off > (header_bytes + sep_len) ? (off - (header_bytes + sep_len)) : 0;
-    size_t content_len = parse_content_length_header(req);
-    size_t used = header_bytes + sep_len;
-    if (used >= MAX_REQ_SIZE || content_len > MAX_REQ_SIZE - used - 1) {
-      http_send_json(fd, 413, "{\"ok\":false,\"error\":\"payload_too_large\"}");
-      free(req);
-      return;
-    }
-    /* Headers parsed — grow straight to the full known size up front, since
-     * pointers taken before a realloc would otherwise dangle. */
-    if (http_grow_buf(&req, &cap, used + content_len) != 0) {
+    if (off >= cap && http_grow_buf(&req, &cap, off + 1) != 0) {
       http_send_json(fd, 500, "{\"ok\":false,\"error\":\"alloc\"}");
       free(req);
       return;
     }
-    while (already_body < content_len) {
-      if (off >= MAX_REQ_SIZE) {
-        http_send_json(fd, 413, "{\"ok\":false,\"error\":\"payload_too_large\"}");
+    int n = recv(fd, req + off, cap - off, 0);
+    if (n <= 0) {
+      if (n < 0 && errno == EINTR) {
+        continue;
+      }
+      if (off == 0) {
         free(req);
         return;
       }
-      int n = recv(fd, req + off, cap - off, 0);
-      if (n <= 0) {
-        if (n < 0 && errno == EINTR) {
-          continue;
-        }
-        break;
-      }
-      off += (size_t)n;
-      already_body += (size_t)n;
+      break;
     }
-    if (already_body < content_len) {
-      http_send_json(fd, 400, "{\"ok\":false,\"error\":\"incomplete_body\"}");
-      free(req);
-      return;
+    off += (size_t)n;
+    req[off] = '\0';
+    if (strstr(req, "\r\n\r\n") || strstr(req, "\n\n")) {
+      break;
     }
-    body_len = content_len;
-    char *body_ptr = req + header_bytes + sep_len;
-    body_ptr[body_len] = '\0';
-
-    char method[8] = {0};
-    char target[1024] = {0};
-    char version[16] = {0};
-    if (sscanf(req, "%7s %1023s %15s", method, target, version) != 3) {
-      http_send_json(fd, 400, "{\"ok\":false,\"error\":\"bad request\"}");
-      free(req);
-      return;
-    }
-    char *query = strchr(target, '?');
-    if (query) {
-      *query = '\0';
-      query++;
-    } else {
-      query = "";
-    }
-
-    /* HTTP/1.1 defaults to a persistent connection unless the client asks to
-     * close; HTTP/1.0 is the opposite (needs an explicit keep-alive ask). */
-    int wants_close = strcasestr(req, "Connection: close") != NULL;
-    if (!strcasecmp(version, "HTTP/1.0") && !strcasestr(req, "Connection: keep-alive")) {
-      wants_close = 1;
-    }
-    g_http_keep_alive = !wants_close;
-
-    http_route(fd, method, target, query, client_ip ? client_ip : "unknown",
-               body_ptr ? body_ptr : "", body_len);
-
-    if (!g_http_keep_alive) {
-      free(req);
-      return;
-    }
-    /* Loop back and read the next request off the same connection. */
   }
+  if (off == 0) {
+    free(req);
+    return;
+  }
+
+  char *headers_end = strstr(req, "\r\n\r\n");
+  size_t sep_len = 4;
+  if (!headers_end) {
+    headers_end = strstr(req, "\n\n");
+    sep_len = 2;
+  }
+  if (!headers_end) {
+    http_send_json(fd, 400, "{\"ok\":false,\"error\":\"bad request\"}");
+    free(req);
+    return;
+  }
+
+  size_t header_bytes = (size_t)(headers_end - req);
+  req[header_bytes] = '\0';
+  size_t already_body = off > (header_bytes + sep_len) ? (off - (header_bytes + sep_len)) : 0;
+  size_t content_len = parse_content_length_header(req);
+  size_t used = header_bytes + sep_len;
+  if (used >= MAX_REQ_SIZE || content_len > MAX_REQ_SIZE - used - 1) {
+    http_send_json(fd, 413, "{\"ok\":false,\"error\":\"payload_too_large\"}");
+    free(req);
+    return;
+  }
+  /* Headers parsed — grow straight to the full known size up front, since
+   * pointers taken before a realloc would otherwise dangle. */
+  if (http_grow_buf(&req, &cap, used + content_len) != 0) {
+    http_send_json(fd, 500, "{\"ok\":false,\"error\":\"alloc\"}");
+    free(req);
+    return;
+  }
+  while (already_body < content_len) {
+    if (off >= MAX_REQ_SIZE) {
+      http_send_json(fd, 413, "{\"ok\":false,\"error\":\"payload_too_large\"}");
+      free(req);
+      return;
+    }
+    int n = recv(fd, req + off, cap - off, 0);
+    if (n <= 0) {
+      if (n < 0 && errno == EINTR) {
+        continue;
+      }
+      break;
+    }
+    off += (size_t)n;
+    already_body += (size_t)n;
+  }
+  if (already_body < content_len) {
+    http_send_json(fd, 400, "{\"ok\":false,\"error\":\"incomplete_body\"}");
+    free(req);
+    return;
+  }
+  body_len = content_len;
+  char *body_ptr = req + header_bytes + sep_len;
+  body_ptr[body_len] = '\0';
+
+  char method[8] = {0};
+  char target[1024] = {0};
+  char version[16] = {0};
+  if (sscanf(req, "%7s %1023s %15s", method, target, version) != 3) {
+    http_send_json(fd, 400, "{\"ok\":false,\"error\":\"bad request\"}");
+    free(req);
+    return;
+  }
+  char *query = strchr(target, '?');
+  if (query) {
+    *query = '\0';
+    query++;
+  } else {
+    query = "";
+  }
+  int accepts_gzip = request_accepts_gzip(req);
+  http_route(fd, method, target, query, client_ip ? client_ip : "unknown",
+             body_ptr ? body_ptr : "", body_len, accepts_gzip);
+  free(req);
 }
 
 static void
@@ -369,7 +370,7 @@ http_server_thread(void *arg) {
       continue;
     }
     bind_fails = 0;
-    if (listen(listen_fd, 8) != 0) {
+    if (listen(listen_fd, 32) != 0) {
       log_msg("[HTTP] listen() failed: %d", errno);
       notify("CheatRunner HTTP listen failed on %d", http_port);
       close(listen_fd);

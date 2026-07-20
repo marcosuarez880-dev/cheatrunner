@@ -126,11 +126,6 @@ void patch_clear_backups_for_pid(pid_t pid);
 /* Force a rescan of the patch directories on next lookup; also clears applied state. */
 void patch_index_invalidate(void);
 
-/* Global enable/disable: rename all live patch dirs to <dir>.off (off) or back (on).
- * patch_global_enabled() returns 1 if at least one live patch directory exists. */
-int  patch_global_enabled(void);
-void patch_global_set(int on);
-
 /* List/toggle/delete patch XML files; dir_idx: 0=xml_prospero, 1=xml, 2=external. Toggle renames .xml <-> .xml.off. */
 char *patch_files_list_json(void);
 int   patch_file_toggle(const char *name, int on, int dir_idx);

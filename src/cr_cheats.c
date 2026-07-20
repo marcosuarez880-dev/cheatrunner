@@ -559,6 +559,59 @@ find_cheat_file_for_title(const char *title_id, char *out, size_t out_size, int 
   return 1;
 }
 
+/* Resolves a mod's saved name back to its index in title_id's currently-selected
+ * cheat file. Indices shift when a file is re-downloaded/updated, so callers that
+ * persist mod identity across sessions (cheat autoload profiles) must key by name,
+ * not index, and re-resolve at apply time. Returns -1 if not found. */
+int
+cheat_find_mod_index_by_name(const char *title_id, const char *mod_name) {
+  if (!mod_name || !mod_name[0]) return -1;
+  char path[256];
+  int kind = 0;
+  if (!find_cheat_file_for_title(title_id, path, sizeof(path), &kind)) return -1;
+
+  char *txt = NULL;
+  if (read_file_text(path, &txt) != 0 || !txt) return -1;
+
+  char *json_txt = NULL;
+  if (kind == 1) {
+    json_txt = txt;
+  } else if (kind == 2) {
+    json_txt = shn_xml_to_json(txt, strlen(txt));
+    free(txt);
+  } else if (kind == 3) {
+    char *xml = mc4_decrypt_to_xml(txt, strlen(txt), NULL);
+    free(txt);
+    if (!xml) return -1;
+    json_txt = shn_xml_to_json(xml, strlen(xml));
+    free(xml);
+  } else {
+    free(txt);
+  }
+  if (!json_txt) return -1;
+
+  cJSON *root = cJSON_Parse(json_txt);
+  free(json_txt);
+  if (!root) return -1;
+
+  int found = -1;
+  cJSON *mods = cJSON_GetObjectItem(root, "mods");
+  if (cJSON_IsArray(mods)) {
+    int idx = 0;
+    cJSON *m = NULL;
+    cJSON_ArrayForEach(m, mods) {
+      cJSON *name_j = cJSON_GetObjectItem(m, "name");
+      if (cJSON_IsString(name_j) && name_j->valuestring && !strcmp(name_j->valuestring, mod_name)) {
+        found = idx;
+        break;
+      }
+      idx++;
+    }
+  }
+  cJSON_Delete(root);
+  return found;
+}
+
 /* Fills *ctx_out with all candidates + best selection.
  * override_ver: if non-NULL and non-empty, used as preferred_ver (e.g. live game version);
  *               otherwise falls back to static SFO lookup. */

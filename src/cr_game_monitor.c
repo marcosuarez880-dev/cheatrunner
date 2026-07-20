@@ -12,7 +12,9 @@
 #include <ps5/kernel.h>
 
 #include "cr_addr_cache.h"
+#include "cr_cheat_profiles.h"
 #include "cr_cheats.h"
+#include "cr_patch_profiles.h"
 #include "cr_launch.h"
 #include "cr_patch_parser.h"
 #include "cr_config.h"
@@ -293,6 +295,37 @@ get_current_title(char *out, size_t out_size) {
 }
 
 
+typedef struct {
+  char title_id[16];
+  pid_t pid;
+} autoload_seq_ctx_t;
+
+/* Patches before cheats, off the monitor thread — both calls now block. */
+static void *
+autoload_sequence_thread(void *arg) {
+  autoload_seq_ctx_t *ctx = (autoload_seq_ctx_t *)arg;
+  patch_profiles_autoload_for_title(ctx->title_id, ctx->pid);
+  cheat_profiles_autoload_for_title(ctx->title_id, ctx->pid);
+  free(ctx);
+  return NULL;
+}
+
+static void
+autoload_profiles_for_title(const char *title_id, pid_t pid) {
+  autoload_seq_ctx_t *ctx = (autoload_seq_ctx_t *)malloc(sizeof(*ctx));
+  if (!ctx) {
+    return;
+  }
+  snprintf(ctx->title_id, sizeof(ctx->title_id), "%s", title_id ? title_id : "");
+  ctx->pid = pid;
+  pthread_t t;
+  if (pthread_create(&t, NULL, autoload_sequence_thread, ctx) != 0) {
+    free(ctx);
+    return;
+  }
+  pthread_detach(t);
+}
+
 void
 rpc_refresh_title_and_notify(void) {
   running_game_state_t cur;
@@ -425,6 +458,7 @@ rpc_refresh_title_and_notify(void) {
       cr_log("info", "game", "game started %s", cur.title_id);
       launch_status_recover_for_game(cur.title_id);
       addr_cache_clear_for_title(cur.title_id);
+      autoload_profiles_for_title(cur.title_id, cur.pid);
     }
   }
 

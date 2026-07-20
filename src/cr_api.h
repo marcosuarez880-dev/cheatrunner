@@ -4,6 +4,7 @@
 #include <stddef.h>
 
 void http_route(int fd, const char *method, const char *path, const char *query,
-                const char *client_ip, const char *body, size_t body_len);
+                const char *client_ip, const char *body, size_t body_len,
+                int accepts_gzip);
 
 #endif

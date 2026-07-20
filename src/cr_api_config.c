@@ -32,7 +32,8 @@ handle_api_config(int fd) {
            "\"allow_unsafe_mc4_apply\":%d,\"allow_unsafe_shn_apply\":%d,"
            "\"cheat_log_candidates\":%d,\"cheat_mark_crash_suspect\":%d,"
            "\"cheat_apply_one_at_a_time\":%d,"
-           "\"cheat_address_auto_detect\":%d}",
+           "\"cheat_address_auto_detect\":%d,"
+           "\"tile_autoinstall_enabled\":%d}",
            g_cfg.http_port, g_cfg.auto_load_cheat_menu,
            g_cfg.auto_download_missing_cheat, g_cfg.launch_kill_current, g_cfg.launch_kill_delay_ms,
            g_cfg.launch_wait_timeout_ms, g_cfg.cheat_engine, g_cfg.cheat_validate_original_bytes,
@@ -53,7 +54,8 @@ handle_api_config(int fd) {
            g_cfg.allow_unsafe_mc4_apply, g_cfg.allow_unsafe_shn_apply,
            g_cfg.cheat_log_candidates, g_cfg.cheat_mark_crash_suspect,
            g_cfg.cheat_apply_one_at_a_time,
-           g_cfg.cheat_address_auto_detect);
+           g_cfg.cheat_address_auto_detect,
+           g_cfg.tile_autoinstall_enabled);
   pthread_mutex_unlock(&g_cfg_lock);
   http_send_json(fd, 200, body);
 }
@@ -199,6 +201,8 @@ handle_api_config_set(int fd, const char *query) {
   } else if (!strcmp(key, "fan_max_c")) {
     int v = atoi(value);
     g_cfg.fan_max_c = (v >= 50 && v <= 100) ? v : 90;
+  } else if (!strcmp(key, "tile_autoinstall_enabled")) {
+    g_cfg.tile_autoinstall_enabled = atoi(value) ? 1 : 0;
   } else if (!strncmp(key, "hotkey_", 7)) {
     /* removed — silently ignore */
     (void)value;

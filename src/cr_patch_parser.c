@@ -536,39 +536,6 @@ patch_file_delete(const char *name, int dir_idx) {
     return unlink(path) == 0 ? 0 : -1;
 }
 
-/* Returns 1 if at least one live patch directory exists (patches globally enabled). */
-int
-patch_global_enabled(void) {
-    struct stat st;
-    for (int i = 0; i < K_PF_NDIRS; i++) {
-        if (stat(k_pf_dirs[i].dir, &st) == 0 && S_ISDIR(st.st_mode))
-            return 1;
-    }
-    return 0;
-}
-
-/* Enable or disable all XML patch directories at once by renaming dir <-> dir.off.
- * Invalidates the patch index so the next lookup rescans. */
-void
-patch_global_set(int on) {
-    struct stat st;
-    for (int i = 0; i < K_PF_NDIRS; i++) {
-        const char *live = k_pf_dirs[i].dir;
-        char off[512];
-        snprintf(off, sizeof(off), "%s.off", live);
-        if (on) {
-            if (stat(off, &st) == 0 && S_ISDIR(st.st_mode))
-                rename(off, live);
-            else if (stat(live, &st) != 0)
-                mkdir(live, 0755);
-        } else {
-            if (stat(live, &st) == 0 && S_ISDIR(st.st_mode))
-                rename(live, off);
-        }
-    }
-    patch_index_invalidate();
-}
-
 /* Extract all <ID>...</ID> values from the <TitleID> block and add (id, path, kind)
  * entries to the index.  Allows duplicate (title_id, path) pairs to be skipped. */
 static void

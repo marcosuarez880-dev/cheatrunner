@@ -118,6 +118,7 @@ extern volatile uint64_t g_last_apply_at_ms;
 extern volatile uint64_t g_post_apply_guard_until_ms;
 
 int find_cheat_file_for_title(const char *title_id, char *out, size_t out_size, int *kind_out);
+int cheat_find_mod_index_by_name(const char *title_id, const char *mod_name);
 int find_cheat_candidates(const char *title_id, cheat_file_search_t *ctx_out);
 /* Like find_cheat_candidates but uses override_ver (if non-NULL/non-empty) instead of static SFO lookup. */
 int find_cheat_candidates_ex(const char *title_id, const char *override_ver, cheat_file_search_t *ctx_out);

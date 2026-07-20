@@ -265,6 +265,21 @@ fan_set_request(int fd, const char *query) {
 }
 
 static void
+fan_reset_request(int fd) {
+  /* Unpin only — the firmware already resets the fan override to automatic
+   * on the next app launch; the watcher just needs to stop re-pinning it. */
+  atomic_store(&g_pinned_threshold_c, 0);
+  fan_save_threshold(0);
+  cr_log("info", "fan", "threshold unpinned — returning to automatic on next app launch");
+
+  cJSON *r = cJSON_CreateObject();
+  if (!r) { http_send_json(fd, 500, "{\"ok\":false}"); return; }
+  cJSON_AddBoolToObject(r, "ok", 1);
+  cJSON_AddBoolToObject(r, "pinned", 0);
+  send_obj(fd, 200, r);
+}
+
+static void
 fan_info_request(int fd) {
   cJSON *r = cJSON_CreateObject();
   if (!r) { http_send_json(fd, 500, "{\"ok\":false}"); return; }
@@ -282,8 +297,9 @@ int
 cr_api_fan_handle(int fd, const char *method, const char *path,
                   const char *query, const char *body, size_t body_len) {
   (void)method; (void)body; (void)body_len;
-  if (!strcmp(path, "/api/fan/temp")) { fan_temp_request(fd); return 1; }
-  if (!strcmp(path, "/api/fan/set"))  { fan_set_request(fd, query); return 1; }
-  if (!strcmp(path, "/api/fan"))      { fan_info_request(fd); return 1; }
+  if (!strcmp(path, "/api/fan/temp"))  { fan_temp_request(fd); return 1; }
+  if (!strcmp(path, "/api/fan/set"))   { fan_set_request(fd, query); return 1; }
+  if (!strcmp(path, "/api/fan/reset")) { fan_reset_request(fd); return 1; }
+  if (!strcmp(path, "/api/fan"))       { fan_info_request(fd); return 1; }
   return 0;
 }

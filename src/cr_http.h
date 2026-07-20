@@ -3,8 +3,6 @@
 
 extern char g_listen_ip[64];
 extern int g_http_listen_fd;
-/* Per-connection (thread-local) keep-alive decision for the response being built. */
-extern _Thread_local int g_http_keep_alive;
 
 void *http_server_thread(void *arg);
 void *http_net_watchdog_thread(void *arg);

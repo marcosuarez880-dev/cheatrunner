@@ -65,6 +65,7 @@ cheatrunner_config_t g_cfg = {
     .cheat_inter_mod_delay_ms = 0,
     .fan_min_c = 30,
     .fan_max_c = 90,
+    .tile_autoinstall_enabled = 1,
 };
 
 void
@@ -121,6 +122,7 @@ config_set_defaults(cheatrunner_config_t *cfg) {
       .cheat_inter_mod_delay_ms = 0,
       .fan_min_c = 30,
       .fan_max_c = 90,
+      .tile_autoinstall_enabled = 1,
   };
 }
 
@@ -176,6 +178,7 @@ config_save_locked(void) {
       "cheat_inter_mod_delay_ms=%d\n"
       "fan_min_c=%d\n"
       "fan_max_c=%d\n"
+      "tile_autoinstall_enabled=%d\n"
       "theme=%s\n",
       g_cfg.http_port, g_cfg.auto_load_cheat_menu,
       g_cfg.auto_download_missing_cheat, g_cfg.launch_kill_current,
@@ -201,6 +204,7 @@ config_save_locked(void) {
       g_cfg.cheat_master_code_fixup,
       g_cfg.cheat_addr_cache_enabled, g_cfg.cheat_inter_mod_delay_ms,
       g_cfg.fan_min_c, g_cfg.fan_max_c,
+      g_cfg.tile_autoinstall_enabled,
       g_cfg.theme);
   if (n <= 0 || (size_t)n >= sizeof(txt)) {
     return -1;
@@ -348,6 +352,8 @@ config_load(void) {
     } else if (!strcmp(k, "fan_max_c")) {
       int cv = atoi(v);
       g_cfg.fan_max_c = (cv >= 50 && cv <= 100) ? cv : 90;
+    } else if (!strcmp(k, "tile_autoinstall_enabled")) {
+      g_cfg.tile_autoinstall_enabled = atoi(v) ? 1 : 0;
     }
   }
   fclose(fp);

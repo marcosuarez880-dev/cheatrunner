@@ -6,6 +6,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+#include "cr_config.h"
 #include "cr_log.h"
 #include "cr_notifications.h"
 #include "cr_paths.h"
@@ -119,6 +120,14 @@ tile_autoinstall_thread(void *arg) {
   cr_log("info", "tile_pkg", "no embedded PKG at build time — skipping");
   return NULL;
 #else
+  pthread_mutex_lock(&g_cfg_lock);
+  int autoinstall_enabled = g_cfg.tile_autoinstall_enabled;
+  pthread_mutex_unlock(&g_cfg_lock);
+  if (!autoinstall_enabled) {
+    cr_log("info", "tile_pkg", "auto-install disabled in config — skipping");
+    return NULL;
+  }
+
   /* Already installed — avoid triggering AppPrepareOverwriteByPackage every
    * boot (that crashes SceShellCore's SceAppInstallerJobQueue on some FWs). */
   struct stat st;

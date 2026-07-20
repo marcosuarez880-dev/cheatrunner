@@ -56,6 +56,7 @@ typedef struct cheatrunner_config {
   int cheat_inter_mod_delay_ms;
   int fan_min_c;   /* lower bound for the fan-on threshold slider (default 30) */
   int fan_max_c;   /* upper bound for the fan-on threshold slider (default 90) */
+  int tile_autoinstall_enabled;
 } cheatrunner_config_t;
 
 extern pthread_mutex_t      g_cfg_lock;

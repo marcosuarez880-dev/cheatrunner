@@ -13,6 +13,8 @@ void http_send_response(int fd, int status, const char *content_type,
                         const uint8_t *body, size_t body_len);
 void http_send_response_cached(int fd, int status, const char *content_type,
                                const uint8_t *body, size_t body_len);
+void http_send_response_gzip(int fd, int status, const char *content_type,
+                             const uint8_t *body, size_t body_len, int cacheable);
 int  query_value(const char *query, const char *key, char *out, size_t out_size);
 
 /* ---- /api/logs ---- */

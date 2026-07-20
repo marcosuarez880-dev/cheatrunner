@@ -1,34 +1,48 @@
+#include <stdint.h>
 #include <string.h>
 #include "cr_api_internal.h"
 #include "cr_api_dashboard.h"
+#include "dashboard_html_gz.h"
+#include "dashboard_css_gz.h"
+#include "dashboard_js_gz.h"
 
 extern const char g_dashboard_html[];
 extern const char g_dashboard_css[];
 extern const char g_dashboard_js[];
 
-static void send_asset(int fd, const char *content_type, const char *data) {
-  http_send_response(fd, 200, content_type, (const uint8_t *)data, strlen(data));
-}
-
-static void send_static_asset(int fd, const char *content_type, const char *data) {
-  http_send_response_cached(fd, 200, content_type, (const uint8_t *)data, strlen(data));
+static void
+send_asset(int fd, const char *content_type, const char *data,
+           int accepts_gzip, const unsigned char *gz_data, unsigned long gz_len, int cacheable) {
+  if (accepts_gzip) {
+    http_send_response_gzip(fd, 200, content_type, gz_data, (size_t)gz_len, cacheable);
+    return;
+  }
+  if (cacheable) {
+    http_send_response_cached(fd, 200, content_type, (const uint8_t *)data, strlen(data));
+  } else {
+    http_send_response(fd, 200, content_type, (const uint8_t *)data, strlen(data));
+  }
 }
 
 int
 cr_api_dashboard_handle(int fd, const char *method, const char *path,
-                         const char *query, const char *body, size_t body_len) {
+                         const char *query, const char *body, size_t body_len,
+                         int accepts_gzip) {
   (void)method; (void)query; (void)body; (void)body_len;
   if (!strcmp(path, "/") || !strcmp(path, "/index.html") ||
       !strcmp(path, "/launcher.html")) {
-    send_asset(fd, "text/html; charset=utf-8", g_dashboard_html);
+    send_asset(fd, "text/html; charset=utf-8", g_dashboard_html, accepts_gzip,
+               g_dashboard_html_gz, g_dashboard_html_gz_len, 0);
     return 1;
   }
   if (!strcmp(path, "/dashboard.css")) {
-    send_static_asset(fd, "text/css; charset=utf-8", g_dashboard_css);
+    send_asset(fd, "text/css; charset=utf-8", g_dashboard_css, accepts_gzip,
+               g_dashboard_css_gz, g_dashboard_css_gz_len, 1);
     return 1;
   }
   if (!strcmp(path, "/dashboard.js")) {
-    send_static_asset(fd, "application/javascript; charset=utf-8", g_dashboard_js);
+    send_asset(fd, "application/javascript; charset=utf-8", g_dashboard_js, accepts_gzip,
+               g_dashboard_js_gz, g_dashboard_js_gz_len, 1);
     return 1;
   }
   if (!strcmp(path, "/CheatRunner.png") || !strcmp(path, "/favicon.png") ||
@@ -39,7 +53,7 @@ cr_api_dashboard_handle(int fd, const char *method, const char *path,
   if (!strcmp(path, "/cache.appcache")) {
     static const char appcache[] =
       "CACHE MANIFEST\n"
-      "# CheatRunner v0.15\n"
+      "# CheatRunner v0.16\n"
       "# Build: " __DATE__ " " __TIME__ "\n"
       "\n"
       "CACHE:\n"

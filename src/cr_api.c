@@ -35,6 +35,8 @@
 #include "cr_cheat_formats.h"
 #include "cr_version.h"
 #include "cr_cheats.h"
+#include "cr_cheat_profiles.h"
+#include "cr_patch_profiles.h"
 #include "cr_patch_parser.h"
 #include "cr_http.h"
 #include "cr_remote_sources.h"
@@ -46,6 +48,8 @@
 #include "cr_api_dashboard.h"
 #include "cr_api_games.h"
 #include "cr_api_cheats.h"
+#include "cr_api_cheat_profiles.h"
+#include "cr_api_patch_profiles.h"
 #include "cr_api_patches.h"
 #include "cr_api_sources.h"
 #include "cr_api_dev.h"
@@ -60,7 +64,7 @@
 #endif
 
 #ifndef CHEATRUNNER_VERSION
-#define CHEATRUNNER_VERSION "0.15"
+#define CHEATRUNNER_VERSION "0.16"
 #endif
 
 #define MAX_GAMES CR_APPDB_MAX_GAMES
@@ -188,12 +192,12 @@ http_send_response(int fd, int status, const char *content_type, const uint8_t *
                    "HTTP/1.1 %d %s\r\n"
                    "Content-Type: %s\r\n"
                    "Content-Length: %u\r\n"
-                   "Connection: %s\r\n"
+                   "Connection: close\r\n"
                    "Access-Control-Allow-Origin: *\r\n"
                    "Cache-Control: no-cache\r\n"
                    "\r\n",
                    status, status_text_for(status), content_type ? content_type : "application/octet-stream",
-                   (unsigned int)body_len, g_http_keep_alive ? "keep-alive" : "close");
+                   (unsigned int)body_len);
   if (n > 0) {
     if (socket_send_all(fd, header, (size_t)n) != 0) {
       return;
@@ -211,12 +215,37 @@ http_send_response_cached(int fd, int status, const char *content_type, const ui
                    "HTTP/1.1 %d %s\r\n"
                    "Content-Type: %s\r\n"
                    "Content-Length: %u\r\n"
-                   "Connection: %s\r\n"
+                   "Connection: close\r\n"
                    "Access-Control-Allow-Origin: *\r\n"
                    "Cache-Control: public, max-age=3600\r\n"
                    "\r\n",
                    status, status_text_for(status), content_type ? content_type : "application/octet-stream",
-                   (unsigned int)body_len, g_http_keep_alive ? "keep-alive" : "close");
+                   (unsigned int)body_len);
+  if (n > 0) {
+    if (socket_send_all(fd, header, (size_t)n) != 0) {
+      return;
+    }
+    if (body_len > 0) {
+      (void)socket_send_all(fd, body, body_len);
+    }
+  }
+}
+
+void
+http_send_response_gzip(int fd, int status, const char *content_type,
+                        const uint8_t *body, size_t body_len, int cacheable) {
+  char header[512];
+  int n = snprintf(header, sizeof(header),
+                   "HTTP/1.1 %d %s\r\n"
+                   "Content-Type: %s\r\n"
+                   "Content-Encoding: gzip\r\n"
+                   "Content-Length: %u\r\n"
+                   "Connection: close\r\n"
+                   "Access-Control-Allow-Origin: *\r\n"
+                   "Cache-Control: %s\r\n"
+                   "\r\n",
+                   status, status_text_for(status), content_type ? content_type : "application/octet-stream",
+                   (unsigned int)body_len, cacheable ? "public, max-age=3600" : "no-cache");
   if (n > 0) {
     if (socket_send_all(fd, header, (size_t)n) != 0) {
       return;
@@ -812,6 +841,8 @@ build_games_json_array(char *buf, size_t cap, int debug_names) {
     int is_app = cr_title_is_known_media_app(entries[i].title_id, entries[i].title_name);
     const char *platform = is_app ? "APP" : platform_for_title_id(entries[i].title_id);
     int running = strcmp(running_title, entries[i].title_id) == 0;
+    int autoload_cheats = cheat_profiles_has(entries[i].title_id);
+    int autoload_patches = patch_profiles_has(entries[i].title_id);
     const char *cheat_fmt = has_cheat ? (cheat_kind == 1 ? "json" : (cheat_kind == 2 ? "shn" : "mc4")) : "";
     if (read_param_value_by_title_id(entries[i].title_id, "contentVersion", ver, sizeof(ver)) != 0)
       read_param_value_by_title_id(entries[i].title_id, "appVersion", ver, sizeof(ver));
@@ -829,12 +860,14 @@ build_games_json_array(char *buf, size_t cap, int debug_names) {
         "\"version\":\"%s\","
         "\"contentId\":\"%s\",\"icon\":%s,\"iconUrl\":\"/appdb/icon?id=%s\",\"pic0\":%s,"
         "\"pic0Url\":\"/appdb/pic0?id=%s\",\"hasCheat\":%s,\"cheatFormat\":\"%s\",\"hasPatch\":%s,\"running\":%s,"
+        "\"autoloadCheats\":%s,\"autoloadPatches\":%s,"
         "\"playTime\":%llu,\"lastAccessTime\":%llu",
         emitted == 0 ? "" : ",", entries[i].title_id, name_esc, platform,
         is_app ? "app" : "game", is_app ? "true" : "false",
         ver_esc ? ver_esc : "unknown", cid_esc ? cid_esc : "",
         has_icon ? "true" : "false", entries[i].title_id, has_pic0 ? "true" : "false", entries[i].title_id,
         has_cheat ? "true" : "false", cheat_fmt, has_patch ? "true" : "false", running ? "true" : "false",
+        autoload_cheats ? "true" : "false", autoload_patches ? "true" : "false",
         (unsigned long long)entries[i].play_time_seconds,
         (unsigned long long)entries[i].last_access_time);
     if (debug_names) {
@@ -4478,11 +4511,11 @@ http_send_png_asset(int fd) {
     "HTTP/1.1 200 OK\r\n"
     "Content-Type: image/png\r\n"
     "Content-Length: %u\r\n"
-    "Connection: %s\r\n"
+    "Connection: close\r\n"
     "Access-Control-Allow-Origin: *\r\n"
     "Cache-Control: public, max-age=86400\r\n"
     "\r\n",
-    (unsigned int)len, g_http_keep_alive ? "keep-alive" : "close");
+    (unsigned int)len);
   if (n > 0) {
     if (socket_send_all(fd, header, (size_t)n) != 0) {
       return;
@@ -4493,7 +4526,8 @@ http_send_png_asset(int fd) {
 
 void
 http_route(int fd, const char *method, const char *path, const char *query,
-           const char *client_ip, const char *body, size_t body_len) {
+           const char *client_ip, const char *body, size_t body_len,
+           int accepts_gzip) {
   if (!g_startup_ms) {
     struct timespec _ts; clock_gettime(CLOCK_MONOTONIC, &_ts);
     g_startup_ms = (long long)_ts.tv_sec * 1000LL + (long long)(_ts.tv_nsec / 1000000L);
@@ -4503,10 +4537,12 @@ http_route(int fd, const char *method, const char *path, const char *query,
     http_send_json(fd, 405, "{\"ok\":false,\"error\":\"GET/POST only\"}");
     return;
   }
-  if (cr_api_dashboard_handle(fd, method, path, query, body, body_len)) return;
+  if (cr_api_dashboard_handle(fd, method, path, query, body, body_len, accepts_gzip)) return;
   if (cr_api_games_handle(fd, method, path, query, body, body_len)) return;
   if (cr_api_cheats_handle(fd, method, path, query, body, body_len)) return;
+  if (cr_api_cheat_profiles_handle(fd, method, path, query, body, body_len)) return;
   if (cr_api_patches_handle(fd, method, path, query, body, body_len)) return;
+  if (cr_api_patch_profiles_handle(fd, method, path, query, body, body_len)) return;
   if (cr_api_sources_handle(fd, method, path, query, body, body_len)) return;
   if (cr_api_logs_handle(fd, method, path, query, body, body_len)) return;
   if (cr_api_fan_handle(fd, method, path, query, body, body_len)) return;

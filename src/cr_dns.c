@@ -1,12 +1,12 @@
 #include <arpa/inet.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
-#include <time.h>
 #include <unistd.h>
 
 #include "cr_dns.h"
@@ -119,7 +119,7 @@ cr_dns_resolve(const char *hostname, char *ip_out, size_t ip_out_sz) {
     /* Try two public DNS servers — 8.8.8.8 then 1.1.1.1 */
     static const char *dns_servers[] = { "8.8.8.8", "1.1.1.1", NULL };
 
-    uint16_t qid = (uint16_t)((uint32_t)time(NULL) ^ (uint32_t)(uintptr_t)hostname);
+    uint16_t qid = (uint16_t)arc4random();
     uint8_t query[512], resp[4096];
     int qlen = build_query(hostname, query, sizeof(query), qid);
     if (qlen < 0) return -1;
@@ -138,8 +138,14 @@ cr_dns_resolve(const char *hostname, char *ip_out, size_t ip_out_sz) {
         dns_addr.sin_port        = htons(53);
         dns_addr.sin_addr.s_addr = inet_addr(dns_servers[si]);
 
-        ssize_t sent = sendto(sock, query, (size_t)qlen, 0,
-                              (struct sockaddr *)&dns_addr, sizeof(dns_addr));
+        /* connect() makes the kernel drop any reply not actually from this
+         * server/port instead of accepting a spoofed datagram from anyone. */
+        if (connect(sock, (struct sockaddr *)&dns_addr, sizeof(dns_addr)) != 0) {
+            close(sock);
+            continue;
+        }
+
+        ssize_t sent = send(sock, query, (size_t)qlen, 0);
         if (sent != qlen) { close(sock); continue; }
 
         ssize_t n = recv(sock, resp, sizeof(resp), 0);

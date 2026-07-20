@@ -32,6 +32,8 @@
 #define CHEATRUNNER_TITLE_PREFS_PATH    "/data/cheatrunner/title_prefs.json"
 #define CHEATRUNNER_FAVORITES_PATH      "/data/cheatrunner/favorites.json"
 #define CHEATRUNNER_FAN_PATH            "/data/cheatrunner/fan.json"
+#define CHEATRUNNER_CHEAT_PROFILES_PATH "/data/cheatrunner/cheat_profiles.json"
+#define CHEATRUNNER_PATCH_PROFILES_PATH "/data/cheatrunner/patch_profiles.json"
 #define CHEATRUNNER_CRASH_LOG_PATH      "/data/cheatrunner/crash.log"
 
 /* General utilities */

@@ -20,6 +20,8 @@
 #include "cr_paths.h"
 #include "cr_shutdown.h"
 #include "cr_cheats.h"
+#include "cr_cheat_profiles.h"
+#include "cr_patch_profiles.h"
 #include "cr_addr_cache.h"
 #include "cr_title_prefs.h"
 #include "cr_favorites.h"
@@ -27,7 +29,7 @@
 #include "cr_tile_pkg.h"
 
 #ifndef CHEATRUNNER_VERSION
-#define CHEATRUNNER_VERSION "0.15"
+#define CHEATRUNNER_VERSION "0.16"
 #endif
 
 /* Async-signal-safe crash handler: writes a one-line entry to the crash log
@@ -133,6 +135,8 @@ main(void) {
   addr_cache_load();
   title_prefs_load();
   favorites_load();
+  cheat_profiles_load();
+  patch_profiles_load();
   fan_init();
   cr_tile_autoinstall_init();
   rpc_refresh_title_and_notify();
