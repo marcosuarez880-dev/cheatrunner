@@ -57,6 +57,10 @@ typedef struct cheatrunner_config {
   int fan_min_c;   /* lower bound for the fan-on threshold slider (default 30) */
   int fan_max_c;   /* upper bound for the fan-on threshold slider (default 90) */
   int tile_autoinstall_enabled;
+  int  hotkey_enabled; /* master switch - disables all SceShellUI hooking, for firmwares where it crashes (some 4.xx) */
+  char hotkey_button_a[16]; /* see CR_HOTKEY_BUTTONS in cr_hotkey_buttons.h */
+  char hotkey_button_b[16];
+  int  hotkey_hold_ms;
 } cheatrunner_config_t;
 
 extern pthread_mutex_t      g_cfg_lock;

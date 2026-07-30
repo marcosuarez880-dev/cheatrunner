@@ -30,9 +30,8 @@ cheatrunner_close_servers(void) {
   close_fd_safe(&g_http_listen_fd);
 }
 
-/* Wait briefly for any in-flight cheat apply to finish, then kill unconditionally.
- * Must never block indefinitely here: a stuck apply (e.g. a hung mdbg/ptrace
- * call) must not be able to prevent shutdown from ever reaching SIGKILL. */
+/* Wait briefly for any in-flight cheat apply to finish, then kill unconditionally -
+ * a stuck apply (e.g. a hung mdbg/ptrace call) must never block shutdown forever. */
 static void
 kill_after_no_apply_in_flight(void) {
   for (int waited_ms = 0; waited_ms < 2000; waited_ms += 50) {
@@ -62,8 +61,7 @@ delayed_shutdown_thread(void *arg) {
   notifications_save();
   cr_log("info", "dev", "CheatRunner exiting for reload");
   /* Guaranteed exit: kill_after_no_apply_in_flight always reaches SIGKILL/_exit,
-   * so the thread never just returns and leaves CheatRunner running
-   * ("shutdown didn't work"). */
+   * never just returns and leaves CheatRunner running ("shutdown didn't work"). */
   kill_after_no_apply_in_flight();
   return NULL;
 }

@@ -980,10 +980,8 @@ patch_parse_xml_file(const char *xml_path, const char *title_id,
                     ln->value_len = vlen;
                     memcpy(ln->value, vbuf, vlen);
                 } else if (lt == PATCH_LINE_MASK_JUMP32) {
-                    /* Detour trampoline: Address/Offset locate the hook site (same
-                     * pattern-scan as mask); Target locates the cave via a second,
-                     * independent scan; Value is the code/data written into the cave,
-                     * not a direct write at the hook site. */
+                    /* Detour trampoline: Address/Offset locate the hook site, Target locates the
+                     * cave via a second independent scan, Value is written into the cave, not the hook. */
                     if (!target_str[0]) { lp = line_end + 2; continue; }
                     int plen = parse_mask_pattern(addr_str, ln->pattern, ln->wildcard,
                                                   PATCH_MASK_MAX_BYTES);
@@ -1079,10 +1077,8 @@ scan_for_pattern(pid_t pid, intptr_t scan_start, size_t scan_size,
         if (scanned + read_sz > scan_size) read_sz = scan_size - scanned;
 
         intptr_t chunk_addr = scan_start + (intptr_t)scanned;
-        /* Stop at the first unreadable chunk instead of skipping past it — that's
-         * the edge of the mapped module, not a gap to scan through. Continuing
-         * blindly toward the MASK_SCAN_LIMIT ceiling risks hitting unmapped/MMIO
-         * memory, which has caused a kernel panic. */
+        /* Stop at the first unreadable chunk - that's the mapped module's edge. Continuing
+         * toward MASK_SCAN_LIMIT risks unmapped/MMIO memory, which has caused a kernel panic. */
         if (!ADDR_IN_USER_RANGE(chunk_addr)) break;
         int rrc = mdbg_io_copyout(pid, chunk_addr, buf, read_sz);
         if (rrc < 0) break;
@@ -1196,10 +1192,8 @@ patch_apply_entry_ex(const char *title_id, const patch_entry_t *entry,
         intptr_t write_addr = 0;
 
         if (ln->type == PATCH_LINE_MASK_JUMP32) {
-            /* Detour trampoline: hook site (Address+Offset) gets redirected via a
-             * JMP into a cave (Target); the cave holds Value followed by a JMP
-             * back to just past the hooked bytes. Three independent writes, each
-             * with its own backup so rollback still restores everything. */
+            /* Detour trampoline: hook site (Address+Offset) JMPs into a cave (Target) holding
+             * Value + a JMP back. Three independent writes, each backed up for rollback. */
             intptr_t patch_match = scan_for_pattern(pid, base, MASK_SCAN_LIMIT,
                                                     ln->pattern, ln->wildcard, ln->pattern_len);
             if (!patch_match) {

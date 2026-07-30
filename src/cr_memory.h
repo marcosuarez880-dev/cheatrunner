@@ -57,9 +57,8 @@ void bytes_to_hex(const uint8_t *bytes, size_t len, char *out, size_t out_size);
 void get_cheat_addr_flags(int kind, int entry_abs_flag, int auto_detect,
                           int *abs_flag_out, int *is_non_json_out, int *auto_detect_out);
 
-/* Returns 0 on success, sets *out_base to the module's map base.
- * If module_name is NULL or empty, *out_base = eboot_base.
- * Returns -1 if the named module is not loaded (caller should surface "module_not_loaded" error). */
+/* Returns 0 on success, sets *out_base to the module's map base (eboot_base
+ * if module_name is empty). Returns -1 if the module isn't loaded. */
 int resolve_module_base(pid_t pid, const char *module_name, intptr_t eboot_base, intptr_t *out_base);
 
 /* Returns 1 if the process has libScePs2EmuMenuDialog.sprx loaded (PS2 emulation mode). */

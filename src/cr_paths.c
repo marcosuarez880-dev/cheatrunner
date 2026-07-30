@@ -9,9 +9,24 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+
+#include <ps5/kernel.h>
+
 #include "cr_paths.h"
 
 static volatile uint32_t g_write_tmp_seq = 0;
+
+/* kernel_get_fw_version() encodes each component as literal hex digits
+ * (0x1140 -> "11.40"), so %x formatting (not %u) reproduces it correctly. */
+const char *
+cr_fw_version_string(void) {
+  static char buf[16] = {0};
+  if (!buf[0]) {
+    uint32_t fw = kernel_get_fw_version() >> 16;
+    snprintf(buf, sizeof(buf), "%x.%02x", (fw >> 8) & 0xFF, fw & 0xFF);
+  }
+  return buf;
+}
 
 void
 str_trim(char *s) {

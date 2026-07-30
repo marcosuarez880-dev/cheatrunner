@@ -1,9 +1,8 @@
 #ifndef CR_FAVORITES_H
 #define CR_FAVORITES_H
 
-/* Server-side favorites + recents for game tiles, persisted to
- * /data/cheatrunner/favorites.json so they sync across every browser/device
- * that talks to this CheatRunner instance. */
+/* Server-side favorites + recents for game tiles, persisted to favorites.json
+ * so they sync across every browser/device that talks to this instance. */
 
 void favorites_load(void);
 

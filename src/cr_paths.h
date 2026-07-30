@@ -40,6 +40,10 @@
 void     str_trim(char *s);
 uint64_t now_ms(void);
 
+/* PS5 firmware version, e.g. "11.40" or "4.03". Cached - can't change without
+ * a reboot. */
+const char *cr_fw_version_string(void);
+
 /* File I/O */
 int write_file_atomic(const char *path, const uint8_t *data, size_t len);
 int read_file_bytes(const char *path, uint8_t **out, size_t *out_len);

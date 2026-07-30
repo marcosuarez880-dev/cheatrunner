@@ -8,9 +8,8 @@
 #include "cr_mdbg.h"
 #include "pt.h"
 
-/* x86-64 page-table entry flags (machine/pmap.h defines these too, but pulls
- * in struct pmap_statistics which isn't visible without extra SDK headers —
- * just the 4 constants we need). */
+/* x86-64 page-table entry flags - machine/pmap.h defines these too, but pulls in
+ * struct pmap_statistics with no visible SDK header, so just the 4 constants we need. */
 #define PG_FRAME    (0x000ffffffffff000ul)
 #define X86_PG_V    0x001ul
 #define X86_PG_PS   0x080ul
@@ -58,9 +57,8 @@ mdbg_get_proc_cr3(pid_t pid) {
   unsigned long off = vmspace_pmap_offset(mdbg_fw_version());
   if (!off) return 0;
 
-  /* pm_pml4 (KVA) + pm_cr3 (phys) sit next to each other; read both in one
-   * shot — free to read the extra 8 bytes and it lets us populate the dmap
-   * base cache for virt2phys below. */
+  /* pm_pml4 (KVA) + pm_cr3 (phys) sit next to each other - read both in one shot,
+   * free to grab the extra 8 bytes and populate the dmap base cache for virt2phys below. */
   unsigned long data[2];
   if (kernel_copyout((intptr_t)(vmspace + off + 32), data, sizeof(data))) return 0;
 

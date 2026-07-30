@@ -73,7 +73,8 @@ conflict_map_build(const char *json_text, cheat_conflict_map_t *out) {
         }
     }
 
-    /* group_id = nearest preceding mastercode index (-1 none, -2 is one); name match alone isn't enough, also require a cave-sized (>=16 byte) entry like mod_has_cave_entry(). */
+    /* group_id = nearest preceding mastercode index (-1 none, -2 is one) - name match
+     * alone isn't enough, also require a cave-sized (>=16 byte) entry like mod_has_cave_entry(). */
     int mod_group[CONFLICT_MAX_MODS];
     for (int mi = 0; mi < mod_count; mi++) mod_group[mi] = -1;
     {

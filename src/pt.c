@@ -29,6 +29,7 @@ along with this program; see the file COPYING. If not, see
 
 #include <ps5/kernel.h>
 
+#include "cr_log.h"
 #include "pt.h"
 
 
@@ -36,18 +37,16 @@ along with this program; see the file COPYING. If not, see
  * concurrent callers stomp each other's privileges — serialize with a mutex. */
 static pthread_mutex_t g_ptrace_ucred_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/* Per-thread batch-elevation state (see pt_batch_begin). When depth>0 this thread
- * has already raised its ucred and holds g_ptrace_ucred_lock, so sys_ptrace skips
- * the per-call swap entirely. */
+/* Per-thread batch-elevation state (see pt_batch_begin) - depth>0 means
+ * ucred is already raised and the lock held, so sys_ptrace skips the per-call swap. */
 static __thread int      g_pt_batch_depth  = 0;
 static __thread uint64_t g_pt_batch_authid = 0;
 static __thread uint8_t  g_pt_batch_caps[16];
 
 static int
 sys_ptrace(int request, pid_t pid, caddr_t addr, int data) {
-  /* Inside an open batch on this thread: ucred is already elevated and the ucred
-   * lock is already held by us — just issue the syscall (the expensive path is the
-   * 4 kernel credential ops, not the syscall itself). */
+  /* Inside an open batch: ucred is already elevated and the lock held -
+   * just issue the syscall (the 4 credential ops are the expensive part, not this). */
   if (g_pt_batch_depth > 0) {
     return (int)syscall(SYS_ptrace, request, pid, addr, data);
   }
@@ -184,6 +183,7 @@ pt_attach(pid_t pid) {
 int
 pt_attach_timed(pid_t pid, int timeout_ms) {
   if(sys_ptrace(PT_ATTACH, pid, 0, 0) == -1) {
+    cr_log("warn", "ptrace", "PT_ATTACH failed outright for pid=%d", (int)pid);
     return -1;
   }
 
@@ -196,15 +196,25 @@ pt_attach_timed(pid_t pid, int timeout_ms) {
       return 0;
     }
     if(wret == -1) {
-      sys_ptrace(PT_DETACH, pid, 0, 0);
+      /* errno here is from waitpid() itself, called directly above with nothing
+       * in between - reliable, unlike errno after sys_ptrace() (see below). */
+      cr_log("warn", "ptrace", "waitpid(pid=%d) failed after %dms: %s", (int)pid, waited_ms, strerror(errno));
+      int drc = sys_ptrace(PT_DETACH, pid, 0, 0);
+      cr_log(drc == 0 ? "info" : "error", "ptrace",
+             "PT_DETACH for pid=%d after waitpid error: %s", (int)pid,
+             drc == 0 ? "ok" : "FAILED - process may remain stopped");
       return -1;
     }
     usleep((useconds_t)step_ms * 1000);
     waited_ms += step_ms;
   }
 
-  /* Timed out — detach to leave the process running */
-  sys_ptrace(PT_DETACH, pid, 0, 0);
+  /* Timed out - detach to leave the process running. sys_ptrace() clobbers
+   * errno restoring ucred internally, so only the return code is trustworthy here. */
+  int drc = sys_ptrace(PT_DETACH, pid, 0, 0);
+  cr_log(drc == 0 ? "warn" : "error", "ptrace",
+         "PT_ATTACH: pid=%d timed out after %dms, detach %s", (int)pid, timeout_ms,
+         drc == 0 ? "ok" : "FAILED - process may remain stopped");
   return -2;
 }
 
@@ -326,9 +336,36 @@ pt_getregs(pid_t pid, struct reg *r) {
 }
 
 
+pid_t
+pt_get_lwpid(pid_t pid) {
+  struct ptrace_lwpinfo lwpinfo;
+
+  memset(&lwpinfo, 0, sizeof(lwpinfo));
+  if(sys_ptrace(PT_LWPINFO, pid, (caddr_t)&lwpinfo, sizeof(lwpinfo)) == -1) {
+    return -1;
+  }
+
+  return lwpinfo.pl_lwpid;
+}
+
+
 int
 pt_setregs(pid_t pid, const struct reg *r) {
   return sys_ptrace(PT_SETREGS, pid, (caddr_t)r, 0);
+}
+
+
+/* struct fpreg isn't exposed in userspace headers; PT_FPREGS_SIZE (pt.h)
+ * matches its known size (the legacy FXSAVE area), so callers use a plain buffer. */
+int
+pt_getfpregs(pid_t pid, void *fpregs) {
+  return sys_ptrace(PT_GETFPREGS, pid, (caddr_t)fpregs, 0);
+}
+
+
+int
+pt_setfpregs(pid_t pid, void *fpregs) {
+  return sys_ptrace(PT_SETFPREGS, pid, (caddr_t)fpregs, 0);
 }
 
 
@@ -402,7 +439,7 @@ pt_getlong(pid_t pid, intptr_t addr) {
 }
 
 
-static long
+long
 pt_call(pid_t pid, intptr_t addr, ...) {
   struct reg jmp_reg;
   struct reg bak_reg;
@@ -428,9 +465,8 @@ pt_call(pid_t pid, intptr_t addr, ...) {
     return -1;
   }
 
-  /* Single-step until the injected function returns.
-   * Limit to PT_STEP_MAX iterations — a blocked or looping target would
-   * otherwise hang CheatRunner forever with the game frozen in STOP state. */
+  /* Single-step until the injected function returns, capped at PT_STEP_MAX -
+   * a blocked/looping target would otherwise hang CheatRunner with the game frozen. */
 #define PT_STEP_MAX 1000000
   int pt_steps = 0;
   while(jmp_reg.r_rsp <= bak_reg.r_rsp) {
@@ -596,9 +632,9 @@ pt_perror(pid_t pid, const char *s) {
   intptr_t faddr = pt_resolve(pid, "9BcDykPmo1I");
   intptr_t addr = pt_call(pid, faddr);
   int err = pt_getint(pid, addr);
-  char buf[512];
-  snprintf(buf, sizeof(buf), "%s: %s", s, strerror(err));
-  puts(buf);
+  /* Was puts() - plain stdout, invisible in klog captures. Every LOG_PT_PERROR
+   * call site in the codebase depends on this actually being visible. */
+  cr_log("warn", "ptrace", "%s: %s", s, strerror(err));
 }
 
 

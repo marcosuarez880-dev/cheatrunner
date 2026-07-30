@@ -5,6 +5,7 @@
 
 #include "cr_api_internal.h"
 #include "cr_config.h"
+#include "cr_hotkey_buttons.h"
 #include "cr_log.h"
 
 void
@@ -33,7 +34,9 @@ handle_api_config(int fd) {
            "\"cheat_log_candidates\":%d,\"cheat_mark_crash_suspect\":%d,"
            "\"cheat_apply_one_at_a_time\":%d,"
            "\"cheat_address_auto_detect\":%d,"
-           "\"tile_autoinstall_enabled\":%d}",
+           "\"tile_autoinstall_enabled\":%d,"
+           "\"hotkey_enabled\":%d,"
+           "\"hotkey_button_a\":\"%s\",\"hotkey_button_b\":\"%s\",\"hotkey_hold_ms\":%d}",
            g_cfg.http_port, g_cfg.auto_load_cheat_menu,
            g_cfg.auto_download_missing_cheat, g_cfg.launch_kill_current, g_cfg.launch_kill_delay_ms,
            g_cfg.launch_wait_timeout_ms, g_cfg.cheat_engine, g_cfg.cheat_validate_original_bytes,
@@ -55,7 +58,9 @@ handle_api_config(int fd) {
            g_cfg.cheat_log_candidates, g_cfg.cheat_mark_crash_suspect,
            g_cfg.cheat_apply_one_at_a_time,
            g_cfg.cheat_address_auto_detect,
-           g_cfg.tile_autoinstall_enabled);
+           g_cfg.tile_autoinstall_enabled,
+           g_cfg.hotkey_enabled,
+           g_cfg.hotkey_button_a, g_cfg.hotkey_button_b, g_cfg.hotkey_hold_ms);
   pthread_mutex_unlock(&g_cfg_lock);
   http_send_json(fd, 200, body);
 }
@@ -203,6 +208,35 @@ handle_api_config_set(int fd, const char *query) {
     g_cfg.fan_max_c = (v >= 50 && v <= 100) ? v : 90;
   } else if (!strcmp(key, "tile_autoinstall_enabled")) {
     g_cfg.tile_autoinstall_enabled = atoi(value) ? 1 : 0;
+  } else if (!strcmp(key, "hotkey_enabled")) {
+    g_cfg.hotkey_enabled = atoi(value) ? 1 : 0;
+  } else if (!strcmp(key, "hotkey_button_a")) {
+    if (!cr_hotkey_button_value(value)) {
+      pthread_mutex_unlock(&g_cfg_lock);
+      http_send_json(fd, 400, "{\"ok\":false,\"error\":\"unknown button name\"}");
+      return;
+    }
+    if (!strcmp(value, g_cfg.hotkey_button_b)) {
+      pthread_mutex_unlock(&g_cfg_lock);
+      http_send_json(fd, 400, "{\"ok\":false,\"error\":\"hotkey buttons must be different\"}");
+      return;
+    }
+    snprintf(g_cfg.hotkey_button_a, sizeof(g_cfg.hotkey_button_a), "%s", value);
+  } else if (!strcmp(key, "hotkey_button_b")) {
+    if (!cr_hotkey_button_value(value)) {
+      pthread_mutex_unlock(&g_cfg_lock);
+      http_send_json(fd, 400, "{\"ok\":false,\"error\":\"unknown button name\"}");
+      return;
+    }
+    if (!strcmp(value, g_cfg.hotkey_button_a)) {
+      pthread_mutex_unlock(&g_cfg_lock);
+      http_send_json(fd, 400, "{\"ok\":false,\"error\":\"hotkey buttons must be different\"}");
+      return;
+    }
+    snprintf(g_cfg.hotkey_button_b, sizeof(g_cfg.hotkey_button_b), "%s", value);
+  } else if (!strcmp(key, "hotkey_hold_ms")) {
+    int v = atoi(value);
+    g_cfg.hotkey_hold_ms = (v >= 100 && v <= 5000) ? v : 800;
   } else if (!strncmp(key, "hotkey_", 7)) {
     /* removed — silently ignore */
     (void)value;

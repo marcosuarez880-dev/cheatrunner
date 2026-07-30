@@ -227,7 +227,8 @@ launch_title(uint64_t gen, const char *title_id, const char *args, const char **
     *fguser_out = has_ctx;
   }
 
-  /* Don't kill the current app here (launch worker already handles it, would race); try LncUtil first since SystemService often 0x80940005s on non-standard titles. */
+  /* Don't kill the current app here (launch worker already handles it, would race) -
+   * try LncUtil first since SystemService often 0x80940005s on non-standard titles. */
   lnc_rc = launch_title_with_lncutil(title_id, &ctx, has_ctx, argc > 0 ? argv_ptrs : NULL);
   if (rc_out) {
     *rc_out = lnc_rc;
@@ -237,9 +238,8 @@ launch_title(uint64_t gen, const char *title_id, const char *args, const char **
   }
   if (launch_rc_is_submitted_or_verifiable(lnc_rc)) {
     set_launch_status_ex_gen(gen, 1, "verifying_lnc", title_id, "Verifying launch...", 0, "sceLncUtilLaunchApp", lnc_rc, 0);
-    // 0x80940005 on the LncUtil path: cap the wait to 5s so we fall through to
-    // SystemService quickly when the title never appears. rc==0 (clean submit)
-    // still uses the full verify_timeout.
+    /* 0x80940005 on the LncUtil path caps the wait to 5s so we fall through to
+     * SystemService quickly; rc==0 (clean submit) still uses the full verify_timeout. */
     int lnc_verify_ms = ((uint32_t)lnc_rc == 0x80940005u)
                         ? (verify_timeout < 5000 ? verify_timeout : 5000)
                         : verify_timeout;
@@ -552,7 +552,8 @@ launch_worker_thread(void *arg) {
   uint64_t my_gen = req.generation;
   set_launch_status_ex_gen(my_gen, 1, "killing_current", req.title_id, "Closing current game...", 0, "", 0, 0);
   cr_log("info", "launch", "request title=%s args=\"%s\"", req.title_id, req.args[0] ? req.args : "");
-  /* Verify with a live check before trusting the cache, which can be up to 500ms stale after a manual close. */
+  /* Verify with a live check before trusting the cache, which can be up to
+   * 500ms stale after a manual close. */
   {
     running_game_state_t cur;
     running_state_get(&cur);

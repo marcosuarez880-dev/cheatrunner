@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.10)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 
 project(CheatRunnerPayload C CXX)
-set(CHEATRUNNER_VERSION "0.16")
+set(CHEATRUNNER_VERSION "0.17")
 
 # Embed CheatRunner.png as a C byte array (cheatrunner_png.h in build dir).
 # If the asset is missing, generate a tiny fallback icon so builds still work.
@@ -51,9 +51,14 @@ endif()
 # Gzip-compress the dashboard assets at build time on the host (real zlib,
 # not available in the target SDK) and embed the finished bytes — the PS5
 # binary just serves them, it never compresses anything itself.
+# find_package(Python3) instead of a hardcoded "python3" command: on Windows
+# python3.exe is often a Microsoft Store app-execution-alias stub, not a real
+# interpreter, while the actual install is reachable as "python"/"py".
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
 foreach(_ASSET html css js)
   execute_process(
-    COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_gzip_header.py"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_gzip_header.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/dashboard_${_ASSET}.inc"
             "${CMAKE_CURRENT_BINARY_DIR}/dashboard_${_ASSET}_gz.h"
             "g_dashboard_${_ASSET}_gz"
@@ -69,6 +74,43 @@ file(GLOB CHEATRUNNER_SRC CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
 )
 
+# --- Hotkey injected payload ------------------------------------------------
+# A separate PIE executable, built as its own target then embedded into
+# CheatRunner.elf as a byte array and written into SceShellUI via elfldr_exec.
+add_executable(cr_getdata_payload
+  src/payload/cr_getdata_payload.c
+  src/payload/cr_detour.c
+  src/payload/hde64.c
+)
+set_target_properties(cr_getdata_payload PROPERTIES
+  OUTPUT_NAME cr_getdata_payload.elf
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/payload"
+)
+target_include_directories(cr_getdata_payload PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/payload"
+)
+target_compile_options(cr_getdata_payload PRIVATE -fPIE -Wall -Wextra -O2)
+target_link_options(cr_getdata_payload PRIVATE "-Wl,--allow-multiple-definition")
+target_link_libraries(cr_getdata_payload PRIVATE kernel_sys)
+if(CMAKE_STRIP)
+  add_custom_command(TARGET cr_getdata_payload POST_BUILD
+    COMMAND ${CMAKE_STRIP} --strip-all $<TARGET_FILE:cr_getdata_payload>
+  )
+endif()
+
+set(_GETDATA_BLOB_HEADER "${CMAKE_CURRENT_BINARY_DIR}/cr_getdata_payload_blob.h")
+add_custom_command(
+  OUTPUT "${_GETDATA_BLOB_HEADER}"
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_blob_header.py"
+          "$<TARGET_FILE:cr_getdata_payload>"
+          "${_GETDATA_BLOB_HEADER}"
+          "g_cr_getdata_payload_elf"
+  DEPENDS cr_getdata_payload
+  COMMENT "Embedding cr_getdata_payload.elf as a byte array"
+)
+add_custom_target(cr_getdata_payload_blob DEPENDS "${_GETDATA_BLOB_HEADER}")
+
 add_executable(CheatRunner
   ${CHEATRUNNER_SRC}
   src/third_party/cJSON.c
@@ -81,6 +123,8 @@ add_executable(CheatRunner
 set_target_properties(CheatRunner PROPERTIES
   OUTPUT_NAME CheatRunner.elf
 )
+
+add_dependencies(CheatRunner cr_getdata_payload_blob)
 
 target_include_directories(CheatRunner PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_include_directories(CheatRunner PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -97,6 +141,7 @@ set(CHEATRUNNER_LIBS
   SceHttp
   SceSsl
   SceNet
+  ScePad
   pthread
 )
 

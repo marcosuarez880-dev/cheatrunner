@@ -568,9 +568,8 @@ process_entries_download(const repo_def_t *repo, mirror_entry_list_t *list, int 
 
   progress_add_total(list->count);
 
-  /* Parallel download: spin up MIRROR_DL_WORKERS threads sharing a work queue.
-   * Each worker atomically claims the next entry by incrementing queue->next under
-   * the queue lock, then downloads and saves it independently. */
+  /* Parallel download: MIRROR_DL_WORKERS threads share a work queue, each atomically
+   * claiming the next entry via queue->next under the queue lock. */
   dl_queue_t q;
   memset(&q, 0, sizeof(q));
   q.repo      = repo;

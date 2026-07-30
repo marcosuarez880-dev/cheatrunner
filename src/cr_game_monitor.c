@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
+#include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -199,7 +200,8 @@ read_running_state(running_game_state_t *out) {
     snprintf(st.title_name, sizeof(st.title_name), "%s", title);
   }
   /* Probe patch0 (update), then app0, then /app0, then static paths; PS5 updates mount as patch0, not user/patch/. */
-  /* Cache version per pid: re-reading /proc/{pid}/root/... of a frozen game (cave cheat strips WRITE) blocks the thread in kernel VFS indefinitely, which previously hung the whole daemon. */
+  /* Cache version per pid - re-reading /proc/{pid}/root/... on a frozen game (cave
+   * cheat strips WRITE) blocks the thread in kernel VFS indefinitely, hanging the daemon. */
   static pthread_mutex_t ver_cache_lock = PTHREAD_MUTEX_INITIALIZER;
   static pid_t ver_cache_pid = -1;
   static char  ver_cache_cv[32];
@@ -523,6 +525,7 @@ rpc_refresh_title_and_notify(void) {
 void *
 game_monitor_thread(void *arg) {
   (void)arg;
+  syscall(SYS_thr_set_name, -1, "CheatRunner.elf");
   time_t last_save = 0;
   while (g_game_monitor_running) {
     rpc_refresh_title_and_notify();

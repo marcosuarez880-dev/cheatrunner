@@ -93,9 +93,8 @@ http_init(http_ctx_t *ctx, const char *agent, const char *url, int timeout_ms) {
   if ((err = sceHttpsSetSslCallback(ctx->tmpl_id, http_ssl_cb, 0)) < 0) {
     return err;
   }
-  /* DNS bypass: resolve hostname via 8.8.8.8 to work around PS5 DNS = 127.0.0.1.
-   * Substitute the resolved IP into the URL; set Host header so the server
-   * routes correctly. The ssl_cb returning 0 suppresses any SNI/cert mismatch. */
+  /* DNS bypass: resolve via 8.8.8.8 (PS5 DNS is 127.0.0.1) and substitute the IP
+   * into the URL; Host header keeps routing correct, ssl_cb(0) skips SNI/cert checks. */
   char resolved_url[1024];
   char orig_host[256];
   orig_host[0] = '\0';
@@ -144,9 +143,8 @@ http_init(http_ctx_t *ctx, const char *agent, const char *url, int timeout_ms) {
   }
   if (timeout_ms > 0) {
     unsigned int t_us = (unsigned int)timeout_ms * 1000u;
-    /* Set timeouts at all levels: template → connection → request.
-     * Some sceHttp versions only honour the timeout when set at the connection
-     * or template level; setting all three ensures at least one takes effect. */
+    /* Set timeouts at all levels (template, connection, request) - some sceHttp
+     * versions only honour it at one specific level, so cover all three. */
     (void)sceHttpSetConnectTimeOut(ctx->tmpl_id, t_us);
     (void)sceHttpSetResolveTimeOut(ctx->tmpl_id, t_us);
     (void)sceHttpSetSendTimeOut(ctx->tmpl_id, t_us);

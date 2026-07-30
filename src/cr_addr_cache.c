@@ -101,7 +101,8 @@ addr_cache_load(void) {
 /* Internal: must be called with g_addr_cache_lock held. */
 static void
 addr_cache_save_locked(void) {
-    /* Generous per-entry cap: under-sizing truncates the snprintf mid-entry, producing invalid JSON that silently drops the whole cache on next load. */
+    /* Generous per-entry cap - under-sizing truncates the snprintf mid-entry, producing
+     * invalid JSON that silently drops the whole cache on next load. */
     size_t cap = (size_t)g_addr_cache_n * 1200 + 64;
     if (cap < 4) cap = 4;
     char *buf = malloc(cap);

@@ -76,9 +76,8 @@ cr_source_jobs_cleanup(void) {
   pthread_mutex_unlock(&g_jobs_lock);
 }
 
-/* cr_source_job_start: parses body_json (a cJSON object already parsed by caller),
-   allocates a slot, spawns a thread, returns 0 on success with *out_job_id set.
-   Returns non-zero on error (caller should send appropriate HTTP error). */
+/* Parses body_json (already parsed by caller), allocates a slot, spawns a thread.
+ * Returns 0 with *out_job_id set on success, non-zero on error. */
 
 static void *source_job_thread(void *arg);
 

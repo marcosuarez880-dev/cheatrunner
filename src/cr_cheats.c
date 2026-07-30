@@ -311,9 +311,8 @@ best_by_match(cheat_file_search_t *ctx, int match_class,
   return 1;
 }
 
-/* Apply version-aware selection rules after classification:
- * 1. preferred_ver known  →  exact → generic → block (wrong_version needs force)
- * 2. preferred_ver unknown → use whatever score-based best was set during scan */
+/* Selection order when preferred_ver is known: exact -> generic -> wrong-version
+ * (needs force). Unknown preferred_ver just keeps the score-based best from the scan. */
 static void
 apply_selection_rules(cheat_file_search_t *ctx) {
   ctx->selection_kind = CHEAT_SEL_NONE;
@@ -559,10 +558,8 @@ find_cheat_file_for_title(const char *title_id, char *out, size_t out_size, int 
   return 1;
 }
 
-/* Resolves a mod's saved name back to its index in title_id's currently-selected
- * cheat file. Indices shift when a file is re-downloaded/updated, so callers that
- * persist mod identity across sessions (cheat autoload profiles) must key by name,
- * not index, and re-resolve at apply time. Returns -1 if not found. */
+/* Indices shift when a cheat file is re-downloaded, so callers that persist mod
+ * identity across sessions (autoload profiles) must key by name, not index. */
 int
 cheat_find_mod_index_by_name(const char *title_id, const char *mod_name) {
   if (!mod_name || !mod_name[0]) return -1;
@@ -612,9 +609,8 @@ cheat_find_mod_index_by_name(const char *title_id, const char *mod_name) {
   return found;
 }
 
-/* Fills *ctx_out with all candidates + best selection.
- * override_ver: if non-NULL and non-empty, used as preferred_ver (e.g. live game version);
- *               otherwise falls back to static SFO lookup. */
+/* override_ver, if set, is used as preferred_ver (e.g. live game version)
+ * instead of falling back to a static SFO lookup. */
 int
 find_cheat_candidates_ex(const char *title_id, const char *override_ver, cheat_file_search_t *ctx_out) {
   char want[10];
@@ -881,9 +877,8 @@ crash_suspects_load(void) {
     cr_log("info", "cheats.guard", "loaded %d crash suspect(s) from disk", loaded);
 }
 
-/* Returns 1 if any of the mod's entries has a cave-sized (>=16 byte) ON value —
- * real master-code mods define a shared cave; dependents that merely mention
- * "master code" in their own name never do. */
+/* Returns 1 if any entry has a cave-sized (>=16 byte) ON value - real
+ * master-code mods define a shared cave, dependents that just mention it don't. */
 static int
 mod_has_cave_entry(cJSON *mod) {
   cJSON *mem = cJSON_GetObjectItem(mod, "memory");
@@ -901,10 +896,8 @@ mod_has_cave_entry(cJSON *mod) {
   return 0;
 }
 
-/* Nearest preceding mod whose name contains "mastercode" AND defines a cave —
- * governs target_mod_idx (supports multiple mastercode groups in one file).
- * The cave requirement excludes dependents that merely mention "master code"
- * in their own descriptive name (e.g. "MUST enable Master Code first"). */
+/* Requires a cave, not just a name match — avoids false-triggering on
+ * dependents whose own description mentions "master code" (e.g. "MUST enable Master Code first"). */
 cJSON *
 find_master_code_mod_for(cJSON *mods, int target_mod_idx) {
   cJSON *m = NULL;
@@ -949,9 +942,8 @@ mc_scan_dep_addr(pid_t pid, intptr_t mc_addr,
                  intptr_t *addr_out) {
   (void)mc_on;
   if (!mc_on_len || !dep_off_len || dep_off_len > mc_on_len || !addr_out) return 0;
-  /* If all dep_off bytes are identical (NOP padding, zero-fill, etc.) the scan would
-   * match the first run of that byte in the MC payload — a meaningless result.
-   * Skip the scan and use the low-byte formula directly. */
+  /* If dep_off is all-identical bytes (NOP padding, etc.), a byte scan would
+   * match the first random run — skip it and use the low-byte formula directly. */
   {
     int uniform = 1;
     for (size_t _u = 1; _u < dep_off_len; _u++) {
@@ -977,17 +969,15 @@ mc_scan_dep_addr(pid_t pid, intptr_t mc_addr,
     }
   }
   free(buf);
-  /* mc_addr == mod_base + mc_base_off, so mod_base == mc_addr - mc_base_off.
-   * The combined offset must be turned into an absolute process address the
-   * same way cheat_resolve_write_addr_ex does (rel_addr = mod_base + off). */
+  /* mc_addr == mod_base + mc_base_off, so mod_base == mc_addr - mc_base_off;
+   * turn the combined offset into an address the same way cheat_resolve_write_addr_ex does. */
   *addr_out = (mc_addr - (intptr_t)mc_base_off) +
               (intptr_t)((mc_base_off & ~(uint64_t)0xff) | (dep_raw_off & 0xff));
   return 1;
 }
 
-/* Returns 1 if some other entry in the file resolves within `radius` bytes of
- * target_addr and its live bytes verifiably match its own ON or OFF —
- * evidence target_addr sits in the same legitimate cave block, not a wrong address. */
+/* Returns 1 if another entry resolves within `radius` bytes and its live
+ * bytes verifiably match ON/OFF - evidence target_addr sits in the same legitimate cave. */
 static int
 cave_has_verified_neighbor(cJSON *mods, pid_t pid, intptr_t mod_base, intptr_t target_addr, uint64_t radius) {
   cJSON *m = NULL;
@@ -1231,9 +1221,8 @@ apply_cheat_json(const char *title_id, int mod_index, int turn_on, char *err, si
     }
   }
 
-  /* Auto-disable conflicting mods before acquiring the apply lock.
-   * Must happen here (before the lock) so the recursive apply_cheat_json calls
-   * can acquire g_cheat_apply_lock without deadlocking. */
+  /* Auto-disable conflicting mods before acquiring the apply lock - must
+   * happen here so recursive apply_cheat_json calls don't deadlock on it. */
   if (effective_on) {
     char *conflict_json = cJSON_PrintUnformatted(root);
     if (conflict_json) {
@@ -1261,9 +1250,8 @@ apply_cheat_json(const char *title_id, int mod_index, int turn_on, char *err, si
     }
   }
 
-  /* Auto-enable mastercode: if the cheat file has a "Mastercode/Must Be On" mod and we're
-   * enabling a different mod, ensure the mastercode is active first.
-   * Same placement as auto-disable above — must run before the lock to allow recursion. */
+  /* Auto-enable mastercode before a different mod, if the file has one -
+   * same placement as auto-disable above, must run before the lock to allow recursion. */
   if (effective_on) {
     cJSON *mc_m = find_master_code_mod_for(mods, mod_index);
     if (mc_m && mc_m != mod) {
@@ -1576,9 +1564,8 @@ apply_cheat_json(const char *title_id, int mod_index, int turn_on, char *err, si
                      "stale_cache mod=%d entry=%d cached_addr=0x%lx — clearing and retrying without baseline",
                      mod_index, pre_n, (long)caddr);
               addr_cache_clear_for_path(path);
-              /* Mark as stale-retry (2) so addr_cache_set below skips caching
-               * an address that failed verification — reusing it next launch
-               * would cause the same crash. */
+              /* Mark as stale-retry (2) so addr_cache_set below skips caching an
+               * address that failed verification - reusing it next launch would repeat the crash. */
               entry_ace_hit[pre_n] = 2;
               /* Re-derive fallback policy */
               cr_addr_fallback_policy_t retry_pol = CR_ADDR_FALLBACK_BLOCK;
@@ -1646,9 +1633,8 @@ apply_cheat_json(const char *title_id, int mod_index, int turn_on, char *err, si
             }
           }
         }
-        /* MC runtime scan: read the live MC region from process memory and search
-         * for the dependent cheat's off bytes. Overrides addr if a match is found.
-         * Returns 0 on read failure so addr stays at the normally-resolved value. */
+        /* MC runtime scan: search the live MC region for the dependent's off bytes,
+         * overriding addr on a match. Returns 0 (no-op) on read failure. */
         if (mc_should_scan && !af && mc_live_addr > 0 && mc_on_len > 0 && off_len > 0) {
           intptr_t mc_scanned = 0;
           if (mc_scan_dep_addr(pid, mc_live_addr, mc_on_bytes_buf, mc_on_len,
@@ -1940,9 +1926,8 @@ apply_cheat_json(const char *title_id, int mod_index, int turn_on, char *err, si
                "begin title=%s mod=%d write=%d addr=0x%lx len=%zu page=0x%lx span=0x%zx type=%s",
                title_id, mod_index, write_ok_n, (long)addr, wlen, (long)_pg, _sp,
                wi_is_cave[i] ? "cave" : "hook");
-        /* write_process_memory_forced skips kernel_get_vmem_protection, preventing kernel
-         * panics on PS4 BC games and PS5 games with special vmem entry types that cause
-         * kernel_get_vmem_protection to dereference garbage before it can return -5. */
+        /* Skips kernel_get_vmem_protection - it can dereference garbage and panic
+         * the kernel on PS4 BC games and PS5 games with special vmem entry types. */
         int wrc = write_process_memory_forced(pid, addr, data, wlen);
         cr_log("debug", "cheats.mem", "write_rc=%d addr=0x%lx", wrc, (long)addr);
         if (wrc != 0) {

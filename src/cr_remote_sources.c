@@ -727,9 +727,8 @@ github_fetch_cheat_txt_indexes(const remote_source_t *src, cJSON **entries_out, 
     memcpy(txt, body, body_len);
     txt[body_len] = '\0';
     free(body);
-    /* Scan the buffer for CUSA/PPSA tokens that carry a recognised cheat
-       extension matching this format pass.  This is robust against .txt
-       files that embed game names, '=' separators, or other decoration. */
+    /* Scan the buffer for CUSA/PPSA tokens with a recognised cheat extension for this
+     * format pass - robust against .txt files with game names, '=', or other decoration. */
     const char *p = txt;
     while (p && *p) {
       const char *cu = strstr(p, "CUSA");

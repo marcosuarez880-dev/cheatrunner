@@ -5,6 +5,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include "cr_config.h"
+#include "cr_hotkey_buttons.h"
 #include "cr_log.h"
 
 static time_t g_cfg_mtime = 0;
@@ -36,9 +37,8 @@ cheatrunner_config_t g_cfg = {
     .allow_unsafe_shn_apply = 0,
     .allow_legacy_mc4_without_expected = 1,
     .allow_legacy_shn_without_expected = 1,
-    /* Default to relative: PS5 MC4/SHN addresses without explicit expected bytes should use
-     * base + offset.  The old "legacy" magnitude heuristic (off >= 0x200000 → absolute) was
-     * wrong for most PS5 MC4 files and is preserved only as an explicit opt-in option. */
+    /* Relative is correct for most PS5 MC4/SHN files - the old "legacy" magnitude
+     * heuristic (off >= 0x200000 -> absolute) is kept only as an opt-in fallback. */
     .cheat_mc4_unverified_fallback = "relative",
     .cheat_shn_unverified_fallback = "relative",
     .cheat_log_candidates = 0,
@@ -66,6 +66,10 @@ cheatrunner_config_t g_cfg = {
     .fan_min_c = 30,
     .fan_max_c = 90,
     .tile_autoinstall_enabled = 1,
+    .hotkey_enabled = 0,
+    .hotkey_button_a = "L2",
+    .hotkey_button_b = "R3",
+    .hotkey_hold_ms = 800,
 };
 
 void
@@ -123,6 +127,10 @@ config_set_defaults(cheatrunner_config_t *cfg) {
       .fan_min_c = 30,
       .fan_max_c = 90,
       .tile_autoinstall_enabled = 1,
+      .hotkey_enabled = 0,
+      .hotkey_button_a = "L2",
+      .hotkey_button_b = "R3",
+      .hotkey_hold_ms = 800,
   };
 }
 
@@ -179,6 +187,10 @@ config_save_locked(void) {
       "fan_min_c=%d\n"
       "fan_max_c=%d\n"
       "tile_autoinstall_enabled=%d\n"
+      "hotkey_enabled=%d\n"
+      "hotkey_button_a=%s\n"
+      "hotkey_button_b=%s\n"
+      "hotkey_hold_ms=%d\n"
       "theme=%s\n",
       g_cfg.http_port, g_cfg.auto_load_cheat_menu,
       g_cfg.auto_download_missing_cheat, g_cfg.launch_kill_current,
@@ -205,6 +217,8 @@ config_save_locked(void) {
       g_cfg.cheat_addr_cache_enabled, g_cfg.cheat_inter_mod_delay_ms,
       g_cfg.fan_min_c, g_cfg.fan_max_c,
       g_cfg.tile_autoinstall_enabled,
+      g_cfg.hotkey_enabled,
+      g_cfg.hotkey_button_a, g_cfg.hotkey_button_b, g_cfg.hotkey_hold_ms,
       g_cfg.theme);
   if (n <= 0 || (size_t)n >= sizeof(txt)) {
     return -1;
@@ -333,6 +347,19 @@ config_load(void) {
     } else if (!strcmp(k, "cheat_inter_mod_delay_ms")) {
       int cv = atoi(v);
       g_cfg.cheat_inter_mod_delay_ms = (cv >= 0 && cv <= 10000) ? cv : 0;
+    } else if (!strcmp(k, "hotkey_enabled")) {
+      g_cfg.hotkey_enabled = atoi(v) ? 1 : 0;
+    } else if (!strcmp(k, "hotkey_button_a")) {
+      if (cr_hotkey_button_value(v)) {
+        snprintf(g_cfg.hotkey_button_a, sizeof(g_cfg.hotkey_button_a), "%s", v);
+      }
+    } else if (!strcmp(k, "hotkey_button_b")) {
+      if (cr_hotkey_button_value(v)) {
+        snprintf(g_cfg.hotkey_button_b, sizeof(g_cfg.hotkey_button_b), "%s", v);
+      }
+    } else if (!strcmp(k, "hotkey_hold_ms")) {
+      int cv = atoi(v);
+      g_cfg.hotkey_hold_ms = (cv >= 100 && cv <= 5000) ? cv : 800;
     } else if (!strncmp(k, "hotkey_", 7)) {
       /* removed — silently ignore */
     } else if (!strcmp(k, "klog_enabled") || !strcmp(k, "klog_host") ||
@@ -382,6 +409,11 @@ config_load(void) {
   }
   if (g_cfg.title_lookup_timeout_ms < 1000 || g_cfg.title_lookup_timeout_ms > 30000) {
     g_cfg.title_lookup_timeout_ms = 8000;
+  }
+  if (!strcmp(g_cfg.hotkey_button_a, g_cfg.hotkey_button_b)) {
+    cr_log("warn", "config", "hotkey_button_a and hotkey_button_b are the same, resetting to defaults");
+    snprintf(g_cfg.hotkey_button_a, sizeof(g_cfg.hotkey_button_a), "%s", "L2");
+    snprintf(g_cfg.hotkey_button_b, sizeof(g_cfg.hotkey_button_b), "%s", "R3");
   }
   if (g_cfg.games_cache_ttl_ms < 1000 || g_cfg.games_cache_ttl_ms > 300000) {
     g_cfg.games_cache_ttl_ms = 30000;

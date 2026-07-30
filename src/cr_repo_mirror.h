@@ -39,9 +39,8 @@ typedef struct {
 
 extern repo_mirror_progress_t g_repo_mirror;
 
-/* Start a background download for 'source' (hencollection / ps5cheats / goldhen / all).
- * If overwrite=0, existing files are skipped.
- * Returns 0 if the thread was started, -1 if already running or source invalid. */
+/* Starts a background download for 'source' (hencollection/ps5cheats/goldhen/all);
+ * overwrite=0 skips existing files. Returns 0 if started, -1 if already running/invalid. */
 int repo_mirror_start(const char *source, int overwrite);
 
 /* Serialise current progress to buf as a JSON object. */

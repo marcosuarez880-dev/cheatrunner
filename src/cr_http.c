@@ -11,6 +11,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/socket.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 #include "cr_api.h"
@@ -320,6 +321,7 @@ close_fd_safe(int *fd) {
 void *
 http_server_thread(void *arg) {
   (void)arg;
+  syscall(SYS_thr_set_name, -1, "CheatRunner.elf");
   int http_port = CHEATRUNNER_HTTP_PORT;
   int bind_fails = 0;
   pthread_mutex_lock(&g_cfg_lock);
@@ -351,7 +353,8 @@ http_server_thread(void *arg) {
       int be = errno;
       close(listen_fd);
       bind_fails++;
-      /* EADDRINUSE almost always means a previous CheatRunner still holds the port (SO_REUSEADDR can't reclaim a live listener); warn once, then keep retrying. */
+      /* EADDRINUSE almost always means a previous CheatRunner still holds the port
+       * (SO_REUSEADDR can't reclaim a live listener) - warn once, keep retrying. */
       if (bind_fails <= 5) {
         log_msg("[HTTP] bind() failed on %d: %d", http_port, be);
       }
@@ -476,12 +479,12 @@ net_resume_sighandler(int sig) {
   g_net_resume_flag = 1;
 }
 
-/* Watches for IP changes / console resume so the accept() loop's existing
- * socket-recreate path (above) is triggered proactively instead of waiting
- * on accept() to eventually error out on its own. */
+/* Watches for IP changes / console resume so the accept() loop's socket-recreate
+ * path (above) triggers proactively instead of waiting on accept() to error out. */
 void *
 http_net_watchdog_thread(void *arg) {
   (void)arg;
+  syscall(SYS_thr_set_name, -1, "CheatRunner.elf");
   signal(SIGCONT, net_resume_sighandler);
   char last_ip[64] = "";
   while (!g_shutdown_requested) {

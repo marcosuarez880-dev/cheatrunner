@@ -42,9 +42,8 @@ parse_offset_hex_checked(const char *s, uint64_t *out) {
 int
 parse_hex_bytes_checked(const char *s, uint8_t *out, size_t out_cap, size_t *out_len) {
   if (!s || !out || !out_len || out_cap == 0) return -1;
-  /* Some real-world cheat files drop a leading zero (e.g. "1" meant "01",
-   * "4718664" meant "04718664") — an odd nibble count means the first
-   * nibble pairs with an implicit leading zero instead of failing outright. */
+  /* Some real-world cheat files drop a leading zero (e.g. "1" meant "01") - an odd
+   * nibble count pairs the first nibble with an implicit leading zero instead of failing. */
   size_t nibble_count = 0;
   for (const char *p = s; *p; p++) {
     if (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == '-' || *p == ',' || *p == ':') continue;
@@ -73,9 +72,8 @@ parse_hex_bytes_checked(const char *s, uint8_t *out, size_t out_cap, size_t *out
 int
 read_process_memory(pid_t pid, intptr_t addr, uint8_t *out, size_t len) {
   if (!out || len == 0) return -1;
-  /* No XOM fallback anymore — kernel_get_vmem_protection/kernel_mprotect on a
-   * wrong/special address can hang or panic, same risk already fixed on the
-   * write side. An execute-only page with no PROT_READ just reads as failed. */
+  /* No XOM fallback anymore - kernel_get_vmem_protection/kernel_mprotect on a wrong/
+   * special address can hang or panic, same risk already fixed on the write side. */
   return mdbg_io_copyout(pid, addr, out, len) == 0 ? 0 : -1;
 }
 

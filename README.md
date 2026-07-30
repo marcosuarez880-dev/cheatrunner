@@ -1,6 +1,10 @@
 # CheatRunner 🎮
 
-**CheatRunner** is a PS5 web launcher and cheat trainer for **already-jailbroken PS5 consoles**.
+[![Latest release](https://img.shields.io/github/v/release/notmaj0r/CheatRunner?label=Release&logo=github&color=blue)](https://github.com/notmaj0r/CheatRunner/releases/latest)
+[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Join our Discord Server](https://img.shields.io/badge/Discord-Join%20our%20Server-5865F2?logo=discord&logoColor=white)](https://discord.gg/E4g6fEqp46)
+
+**CheatRunner** is a PS5 web-based cheat trainer for **already-jailbroken PS5 consoles**.
 
 It provides a local web dashboard to:
 
@@ -13,8 +17,6 @@ It provides a local web dashboard to:
 - enable/disable supported cheats from your browser;
 - inspect logs, diagnostics, and cheat debug information.
 
-CheatRunner is focused on local/offline homebrew usage on an already-jailbroken PS5.
-
 ---
 
 ## ❤️ Support
@@ -24,7 +26,6 @@ CheatRunner is free and open-source. If you find it useful, feel free to support
 <a href="https://ko-fi.com/maj0r"><img src="https://storage.ko-fi.com/cdn/kofi3.png?v=3" alt="Support me on Ko-fi" height="36"></a>
 <a href="https://buymeacoffee.com/maj0r"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy me a coffee" height="36"></a>
 
-[![Join our Discord Server](https://img.shields.io/badge/Discord-Join%20our%20Server-5865F2?logo=discord&logoColor=white)](https://discord.gg/E4g6fEqp46)
 
 ---
 
@@ -75,6 +76,7 @@ Runtime cheat memory writes can crash the game, break a session, corrupt your sa
 - Address learning cache — resolved SHN/MC4 addresses reused on subsequent applies.
 - Settings panel — address resolution, safety timers, log level, and advanced toggles, all configurable from the dashboard, with one-click presets (Safe / Max Compatibility / Debug), live search, reset-to-defaults, and a dark theme picker.
 - Config hot-reload — edits to `config.ini` on the PS5 (FTP/SSH) are picked up automatically within ~500 ms, no restart required.
+- Controller hotkey — hold two buttons (L2 + R3 by default, configurable) to open the dashboard from the XMB, or jump straight to the running game's trainer. Off by default; enable it from Settings once you've confirmed it's stable on your firmware.
 - Logs panel with a Copy Logs button.
 - Shutdown Payload button for testing and cleanup.
 
@@ -244,6 +246,21 @@ Cheat and patch autoload profiles are independent — you can save one, both, or
 
 ---
 
+## 🎮 Controller Hotkey
+
+Hold two controller buttons together to open CheatRunner.
+
+- From the **XMB**, it opens the dashboard's main page.
+- **In-game**, it jumps straight to that game's trainer instead of the main page.
+
+Default combo is **L2 + R3**, held for 800ms. Both buttons and the hold duration are configurable from **Settings → Hotkey**.
+
+### Enabling the hotkey
+
+The hotkey is **off by default** — it hooks into SceShellUI, and on some PS5 firmwares (seen on 4.xx) that hook can crash the XMB. Turn it on from **Settings → Hotkey → Enable hotkey** once you've confirmed it's stable on your firmware. The rest of CheatRunner works fully without it; you'd just open the dashboard from a browser bookmark instead of L2+R3.
+
+---
+
 ## 🛠️ Building
 
 CheatRunner is built with `ps5-payload-sdk`.
@@ -295,10 +312,11 @@ CheatRunner exists thanks to the PS4/PS5 homebrew and research community.
 
 Special thanks to:
 
-- **ELF Arsenal & VoidShell** for project ideas and implementations;
-- **ps5-payload-sdk** developers and contributors;
+- **[ELF Arsenal](https://git.etawen.dev/soniciso/elf-arsenal) & VoidShell** for project ideas and implementations;
+- **[ps5-payload-dev](https://github.com/ps5-payload-dev)**: [sdk](https://github.com/ps5-payload-dev/sdk), [elfldr](https://github.com/ps5-payload-dev/elfldr), [websrv](https://github.com/ps5-payload-dev/websrv), [pacbrew-repo](https://github.com/ps5-payload-dev/pacbrew-repo);
 - **TeeKay87** for the [HEN-Cheats-Collection](https://github.com/TeeKay87/HEN-Cheats-Collection) project;
 - **etaHEN** for the [PS5_Cheats](https://github.com/etaHEN/PS5_Cheats) project;
+- **[etaHEN](https://github.com/etaHEN/etaHEN)** — the SceShellUI injection/hooking approach is adapted from it;
 - **GoldHEN** for the [GoldHEN_Cheat_Repository](https://github.com/GoldHEN/GoldHEN_Cheat_Repository) project;
 - **RDX-Sci01** for the [HEN-PPSA-Cheats](https://github.com/RDX-Sci01/HEN-PPSA-Cheats) project;
 - **illusionyy** for the [PS-Game-Patch](https://github.com/illusionyy/ps-game-patch) and the [ps-patch-system](https://github.com/illusionyy/ps-patch-system) projects;

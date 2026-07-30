@@ -12,6 +12,8 @@
 #include "cr_log.h"
 #include "cr_paths.h"
 #include "cr_titles.h"
+#include "third_party/stb_image.h"
+#include "third_party/stb_image_write.h"
 
 #if CHEATRUNNER_HAVE_SQLITE_APPDB
 #include "third_party/sqlite3.h"
@@ -639,6 +641,62 @@ cache_media_path(const char *title_id, int is_pic0, char *out, size_t out_size) 
   return 0;
 }
 
+/* icon0.png ships at 512x512 but only displays at ~200-300px - downscale once
+ * here at cache time. Bilinear resize, duplicated from cr_profile.c's resize_rgba. */
+#define CR_ICON_MAX_DIM 256
+
+static uint8_t *
+icon_resize_rgba(const uint8_t *src, int sw, int sh, int dw, int dh) {
+  uint8_t *dst = malloc((size_t)dw * dh * 4);
+  if (!dst) return NULL;
+  for (int y = 0; y < dh; y++) {
+    double ys = (double)y * sh / dh;
+    int y0 = (int)ys, y1 = y0 + 1; if (y1 >= sh) y1 = sh - 1;
+    double yF = ys - y0;
+    for (int x = 0; x < dw; x++) {
+      double xs = (double)x * sw / dw;
+      int x0 = (int)xs, x1 = x0 + 1; if (x1 >= sw) x1 = sw - 1;
+      double xF = xs - x0;
+      const uint8_t *p00 = &src[(y0 * sw + x0) * 4];
+      const uint8_t *p10 = &src[(y0 * sw + x1) * 4];
+      const uint8_t *p01 = &src[(y1 * sw + x0) * 4];
+      const uint8_t *p11 = &src[(y1 * sw + x1) * 4];
+      uint8_t *o = &dst[(y * dw + x) * 4];
+      for (int c = 0; c < 4; c++) {
+        double v = p00[c] * (1.0 - xF) * (1.0 - yF) + p10[c] * xF * (1.0 - yF) +
+                   p01[c] * (1.0 - xF) * yF + p11[c] * xF * yF;
+        if (v < 0) v = 0; if (v > 255) v = 255;
+        o[c] = (uint8_t)(v + 0.5);
+      }
+    }
+  }
+  return dst;
+}
+
+/* Returns -1 on decode/resize/write failure so the caller falls back to
+ * copying the source bytes verbatim instead. */
+static int
+icon_cache_write_resized(const uint8_t *buf, size_t len, const char *cached_path) {
+  int w = 0, h = 0, c = 0;
+  uint8_t *rgba = stbi_load_from_memory(buf, (int)len, &w, &h, &c, 4);
+  if (!rgba || w <= 0 || h <= 0) {
+    if (rgba) stbi_image_free(rgba);
+    return -1;
+  }
+  if (w <= CR_ICON_MAX_DIM && h <= CR_ICON_MAX_DIM) {
+    stbi_image_free(rgba);
+    return -1; /* already small enough, not worth re-encoding */
+  }
+  uint8_t *resized = icon_resize_rgba(rgba, w, h, CR_ICON_MAX_DIM, CR_ICON_MAX_DIM);
+  stbi_image_free(rgba);
+  if (!resized) {
+    return -1;
+  }
+  int ok = stbi_write_png(cached_path, CR_ICON_MAX_DIM, CR_ICON_MAX_DIM, 4, resized, CR_ICON_MAX_DIM * 4);
+  free(resized);
+  return ok ? 0 : -1;
+}
+
 int
 cache_media_ensure(const char *title_id, int is_pic0, char *cached_path, size_t cached_size) {
   char src[512];
@@ -657,6 +715,10 @@ cache_media_ensure(const char *title_id, int is_pic0, char *cached_path, size_t 
   if (read_file_bytes(src, &buf, &len) != 0 || !buf || len == 0) {
     free(buf);
     return -1;
+  }
+  if (!is_pic0 && icon_cache_write_resized(buf, len, cached_path) == 0) {
+    free(buf);
+    return 0;
   }
   int rc = write_file_atomic(cached_path, buf, len);
   free(buf);

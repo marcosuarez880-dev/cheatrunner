@@ -3,9 +3,8 @@
 
 #include <stddef.h>
 
-/* Canonical form: strip leading 'v'/'V', leading zeros per segment, trailing .0 segments.
- * "01.09.00" → "1.9",  "v1.9.0" → "1.9",  "1.09" → "1.9"
- * Returns 1 on success, 0 if input is empty/unparseable (out set to ""). */
+/* Canonical form: strip leading 'v'/'V', leading zeros, trailing .0 segments (e.g.
+ * "v1.09.0" -> "1.9"). Returns 1 on success, 0 if empty/unparseable (out set to ""). */
 int cr_version_normalize(const char *in, char *out, size_t out_sz);
 
 /* 1 if a and b represent the same version (after normalization), 0 otherwise. */

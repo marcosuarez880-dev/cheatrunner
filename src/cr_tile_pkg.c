@@ -140,7 +140,8 @@ tile_autoinstall_thread(void *arg) {
   notify("CheatRunner: installing PKG...");
   cr_log("info", "tile_pkg", "tile not yet installed — starting install");
 
-  /* 3s lets SceShellCore's installer queue settle; only a cold first-boot needs elf-arsenal's full 30s. */
+  /* 3s lets SceShellCore's installer queue settle - only a cold first-boot
+   * needs elf-arsenal's full 30s. */
   sleep(3);
 
   if (jb_escalate_pid(getpid()) != 0) {

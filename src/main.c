@@ -17,6 +17,7 @@
 #include "cr_launch.h"
 #include "cr_log.h"
 #include "cr_notifications.h"
+#include "cr_hotkey_hook.h"
 #include "cr_paths.h"
 #include "cr_shutdown.h"
 #include "cr_cheats.h"
@@ -29,7 +30,7 @@
 #include "cr_tile_pkg.h"
 
 #ifndef CHEATRUNNER_VERSION
-#define CHEATRUNNER_VERSION "0.16"
+#define CHEATRUNNER_VERSION "0.17"
 #endif
 
 /* Async-signal-safe crash handler: writes a one-line entry to the crash log
@@ -77,6 +78,38 @@ main(void) {
   puts("  \\____|_| |_|\\___|\\__,_|\\__|_| \\_\\\\__,_|_| |_|_| |_|\\___|_|   ");
   log_msg("version: %s", CHEATRUNNER_VERSION);
 
+/* Kill any old instance before our own jb_escalate_pid runs — it may hold the
+ * same singleton exploit resource. Capped at 60 spins so a zombie can't loop forever. */
+  {
+    int kill_spins = 0;
+    int found_old = 0;
+    cr_log("info", "boot", "checking for a previous instance (mypid=%d)", (int)getpid());
+    while ((old_pid = find_pid_by_name("CheatRunner.elf")) > 0 && kill_spins < 60) {
+      found_old = 1;
+      cr_log("info", "boot", "found previous instance pid=%d", (int)old_pid);
+      int kerr = kill(old_pid, SIGKILL);
+      if (kerr != 0) {
+        int e = errno;
+        cr_log("warn", "boot", "SIGKILL pid=%d errno=%d", old_pid, e);
+        if (e == EPERM) {
+          cr_log("error", "boot", "cannot kill old instance (EPERM)");
+          break;
+        }
+        if (e == ESRCH) {
+          cr_log("info", "boot", "old instance pid=%d already gone", old_pid);
+          break;
+        }
+      }
+      usleep(150 * 1000);
+      kill_spins++;
+    }
+    if (found_old && old_pid <= 0) {
+      cr_log("info", "boot", "old instance killed");
+    } else if (old_pid > 0 && kill_spins >= 60) {
+      cr_log("warn", "boot", "old instance pid=%d still visible after 9s (zombie?)", old_pid);
+    }
+  }
+
 #ifdef __SCE__
   if (jb_escalate_pid(getpid()) != 0) {
     cr_log("warn", "core", "jb_escalate_pid failed; privilege may be incomplete");
@@ -96,29 +129,6 @@ main(void) {
     }
   }
 #endif
-
-  /* Kill any previous instance before binding; EPERM (old instance escalated, we aren't) breaks fast, ESRCH treated as gone, capped at 60 spins so a zombie can't loop forever. */
-  {
-    int kill_spins = 0;
-    while ((old_pid = find_pid_by_name("CheatRunner.elf")) > 0 && kill_spins < 60) {
-      int kerr = kill(old_pid, SIGKILL);
-      if (kerr != 0) {
-        int e = errno;
-        cr_log("warn", "boot", "SIGKILL pid=%d errno=%d", old_pid, e);
-        if (e == EPERM) {
-          cr_log("error", "boot",
-                 "cannot kill old instance (EPERM) — escalation may have failed");
-          break;
-        }
-        if (e == ESRCH) break;  /* already dead */
-      }
-      usleep(150 * 1000);
-      kill_spins++;
-    }
-    if (old_pid > 0 && kill_spins >= 60) {
-      cr_log("warn", "boot", "old instance pid=%d still visible after 9s (zombie?)", old_pid);
-    }
-  }
 
   {
     int urc = sceUserServiceInitialize(NULL);
@@ -144,10 +154,12 @@ main(void) {
   notify("CheatRunner v" CHEATRUNNER_VERSION " by maj0r");
   notification_add("boot", "CheatRunner v" CHEATRUNNER_VERSION " started");
   cr_log("info", "boot", "version %s", CHEATRUNNER_VERSION);
+  cr_log("info", "boot", "FW: %s", cr_fw_version_string());
 
   pthread_t http_thread;
   pthread_t monitor_thread;
   pthread_t net_watchdog_thread;
+  pthread_t hotkey_hook_thr;
   if (pthread_create(&http_thread, NULL, http_server_thread, NULL) != 0) {
     log_msg("error: could not start HTTP thread");
     notify("CheatRunner HTTP thread failed");
@@ -163,10 +175,16 @@ main(void) {
     notify("CheatRunner game monitor thread failed");
     return 1;
   }
-
+  if (pthread_create(&hotkey_hook_thr, NULL, hotkey_hook_thread, NULL) != 0) {
+    log_msg("error: could not start hotkey hook thread");
+    notify("CheatRunner hotkey hook thread failed");
+    return 1;
+  }
   pthread_join(http_thread, NULL);
   g_game_monitor_running = 0;
+  g_hotkey_hook_running = 0;
   pthread_join(monitor_thread, NULL);
   pthread_join(net_watchdog_thread, NULL);
+  pthread_join(hotkey_hook_thr, NULL);
   return 0;
 }

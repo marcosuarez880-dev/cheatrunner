@@ -64,7 +64,7 @@
 #endif
 
 #ifndef CHEATRUNNER_VERSION
-#define CHEATRUNNER_VERSION "0.16"
+#define CHEATRUNNER_VERSION "0.17"
 #endif
 
 #define MAX_GAMES CR_APPDB_MAX_GAMES
@@ -740,7 +740,7 @@ handle_api_state(int fd) {
   if (rs.running) {
     snprintf(
         body, sizeof(body),
-        "{\"ok\":true,\"version\":\"%s\",\"browserUrl\":\"http://%s:%d/\",\"httpPort\":%d,"
+        "{\"ok\":true,\"version\":\"%s\",\"psFwVersion\":\"%s\",\"browserUrl\":\"http://%s:%d/\",\"httpPort\":%d,"
         "\"cheatSource\":\"local\",\"running\":{\"running\":true,\"titleId\":\"%s\",\"titleName\":\"%s\","
         "\"platform\":\"%s\",\"appId\":\"0x%X\",\"pid\":%d,\"imageBase\":\"0x%lx\",\"contentVersion\":\"%s\","
         "\"appVersion\":\"%s\",\"startedAt\":%llu,\"hasCheat\":%s,\"cheatFormat\":%s},"
@@ -748,7 +748,7 @@ handle_api_state(int fd) {
         "\"config\":{\"autoLoadCheatMenu\":%s,"
         "\"autoDownloadMissingCheat\":%s,\"allowForceEnable\":%s,\"cheatStateAfterLaunchDelayMs\":%d},"
         "\"dev\":{\"reloadEnabled\":%s,\"shutdownDelayMs\":%d}}",
-        CHEATRUNNER_VERSION, g_listen_ip, http_port, http_port, rs.title_id, name_esc ? name_esc : rs.title_name,
+        CHEATRUNNER_VERSION, cr_fw_version_string(), g_listen_ip, http_port, http_port, rs.title_id, name_esc ? name_esc : rs.title_name,
         rs.platform, rs.app_id, (int)rs.pid, (long)rs.image_base, rs.content_version, rs.app_version,
         (unsigned long long)rs.started_at, has_cheat ? "true" : "false",
         cheat_format_field, cheat_engine ? "true" : "false", last_esc ? last_esc : "", local_count,
@@ -758,13 +758,13 @@ handle_api_state(int fd) {
   } else {
     snprintf(
         body, sizeof(body),
-        "{\"ok\":true,\"version\":\"%s\",\"browserUrl\":\"http://%s:%d/\",\"httpPort\":%d,"
+        "{\"ok\":true,\"version\":\"%s\",\"psFwVersion\":\"%s\",\"browserUrl\":\"http://%s:%d/\",\"httpPort\":%d,"
         "\"cheatSource\":\"local\",\"running\":{\"running\":false},"
         "\"cheats\":{\"engine\":%s,\"activeCount\":0,\"lastApplied\":\"%s\",\"localCount\":%d,\"canPatchGameMemory\":%s},"
         "\"config\":{\"autoLoadCheatMenu\":%s,"
         "\"autoDownloadMissingCheat\":%s,\"allowForceEnable\":%s,\"cheatStateAfterLaunchDelayMs\":%d},"
         "\"dev\":{\"reloadEnabled\":%s,\"shutdownDelayMs\":%d}}",
-        CHEATRUNNER_VERSION, g_listen_ip, http_port, http_port, cheat_engine ? "true" : "false",
+        CHEATRUNNER_VERSION, cr_fw_version_string(), g_listen_ip, http_port, http_port, cheat_engine ? "true" : "false",
         last_esc ? last_esc : "", local_count, can_patch ? "true" : "false",
         auto_load ? "true" : "false", auto_download ? "true" : "false",
         allow_force_enable ? "true" : "false", cheat_state_delay_ms, dev_reload_enabled ? "true" : "false",
@@ -830,11 +830,9 @@ build_games_json_array(char *buf, size_t cap, int debug_names) {
     char ver[32] = "";
     char content_id[96] = "";
     char icon_path[512];
-    char pic0_path[512];
     char cheat_path[256];
     int cheat_kind = 0;
     int has_icon = resolve_icon_path(entries[i].title_id, icon_path, sizeof(icon_path)) == 0;
-    int has_pic0 = resolve_pic0_path(entries[i].title_id, pic0_path, sizeof(pic0_path)) == 0;
     int has_cheat = find_cheat_file_for_title(entries[i].title_id, cheat_path, sizeof(cheat_path), &cheat_kind);
     char patch_xml_path[256] = "";
     int has_patch = (patch_find_xml_for_title(entries[i].title_id, patch_xml_path, sizeof(patch_xml_path)) == 0);
@@ -858,14 +856,14 @@ build_games_json_array(char *buf, size_t cap, int debug_names) {
         buf + off, cap - off,
         "%s{\"titleId\":\"%s\",\"titleName\":\"%s\",\"platform\":\"%s\",\"kind\":\"%s\",\"isApp\":%s,"
         "\"version\":\"%s\","
-        "\"contentId\":\"%s\",\"icon\":%s,\"iconUrl\":\"/appdb/icon?id=%s\",\"pic0\":%s,"
-        "\"pic0Url\":\"/appdb/pic0?id=%s\",\"hasCheat\":%s,\"cheatFormat\":\"%s\",\"hasPatch\":%s,\"running\":%s,"
+        "\"contentId\":\"%s\",\"icon\":%s,\"iconUrl\":\"/appdb/icon?id=%s\","
+        "\"hasCheat\":%s,\"cheatFormat\":\"%s\",\"hasPatch\":%s,\"running\":%s,"
         "\"autoloadCheats\":%s,\"autoloadPatches\":%s,"
         "\"playTime\":%llu,\"lastAccessTime\":%llu",
         emitted == 0 ? "" : ",", entries[i].title_id, name_esc, platform,
         is_app ? "app" : "game", is_app ? "true" : "false",
         ver_esc ? ver_esc : "unknown", cid_esc ? cid_esc : "",
-        has_icon ? "true" : "false", entries[i].title_id, has_pic0 ? "true" : "false", entries[i].title_id,
+        has_icon ? "true" : "false", entries[i].title_id,
         has_cheat ? "true" : "false", cheat_fmt, has_patch ? "true" : "false", running ? "true" : "false",
         autoload_cheats ? "true" : "false", autoload_patches ? "true" : "false",
         (unsigned long long)entries[i].play_time_seconds,

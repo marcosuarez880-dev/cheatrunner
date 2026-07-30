@@ -9,9 +9,8 @@
 #include "cr_log.h"
 #include "cr_paths.h"
 
-/* Write to klogsrv via sendsyslog (syscall 0x259).
- * klogsrv reads /dev/klog which receives messages written via this syscall.
- * The <118> prefix is syslog priority (facility=kernel, severity=info). */
+/* sendsyslog (syscall 0x259) -> klogsrv reads /dev/klog. The <118> prefix
+ * is syslog priority (facility=kernel, severity=info). */
 static void
 klog_raw(const char *buf) {
   syscall(0x259, 7, buf, 0);
@@ -44,17 +43,15 @@ klog_send(const char *level, const char *tag, const char *msg) {
   }
 }
 
-/* Plain-text session log at CHEATRUNNER_LOG_PATH, opened once (truncating any
- * previous session's file) and appended to for the lifetime of the process.
- * Caller must hold g_log_lock. */
+/* Plain-text session log at CHEATRUNNER_LOG_PATH - opened once (truncating any
+ * previous session's file), appended to for the process lifetime. Caller holds g_log_lock. */
 static FILE *g_log_file = NULL;
 
 static void
 log_file_write_locked(const char *level, const char *tag, const char *message, time_t ts) {
   if (!g_log_file) {
-    /* /data/cheatrunner may not exist yet this early in boot (ensure_data_dirs()
-     * runs after several log lines) — keep retrying until it does, rather than
-     * giving up for the rest of the session on the first failed attempt. */
+    /* /data/cheatrunner may not exist yet this early in boot (ensure_data_dirs() runs
+     * after several log lines) - keep retrying instead of giving up after one failure. */
     g_log_file = fopen(CHEATRUNNER_LOG_PATH, "w");
   }
   if (!g_log_file) {

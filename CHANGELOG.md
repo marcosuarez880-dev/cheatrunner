@@ -1,6 +1,23 @@
 # CheatRunner — Changelog
 
-## v0.16
+## v0.17
+
+- **Fixed: the trainer/cheat menu, Settings page, and Support/donate popup could silently fail to appear on some PS5 firmwares** (reported on 4.03) — the "Cheat menu loaded" toast would show, but the menu itself never appeared, same for Settings and Support. Root cause, confirmed against that firmware's actual WebKit source: every full-screen overlay in the dashboard positioned itself with the CSS `inset` shorthand, which is gated behind WebKit's `CSSLogicalEnabled` runtime flag — off by default in this build. With `inset` silently dropped, the overlay never got a `top`/`right`/`bottom`/`left`, so it had no size or position to render at, regardless of `display`/`visibility`/`opacity`. (Two earlier attempts in this same release — switching `display:none` to `visibility`/`opacity`, then adding a `transition` — treated it as a compositing/paint timing issue and didn't address this.) Replaced `inset` with explicit `top`/`right`/`bottom`/`left` everywhere it was used for positioning (the three overlays, plus several decorative background/glow/shimmer effects that had the same silent failure but went unnoticed since they're cosmetic). Confirmed fixed on the reporting user's PS5.
+- **Fixed: the Settings page's ON/OFF toggle switches were too cramped for the text**, and the green "ON" fill sat slightly off-center — a CSS math bug on every toggle switch in the app, not just Settings.
+- **Second PS5 browser performance pass, focused on scroll smoothness.** Game tiles, buttons, and switches no longer permanently promote to their own GPU layer — a real scroll-jank source with dozens of tiles on screen, now disabled on PS5 only. Game icons lazy-load, decode off the main thread, and get resized to display size server-side on first cache instead of shipping the full 512×512 source. Search is debounced instead of rebuilding the grid on every keystroke, the health panel stops re-rendering every 10 seconds while collapsed, and a few more always-on animations are now disabled on PS5.
+- **The trainer/cheat menu now goes fullscreen on the PS5 browser** instead of a centered dialog with wasted space on a TV. PC/desktop keeps the centered layout.
+- **The hotkey now opens straight to the trainer for the game currently running**, instead of the dashboard's main page. From the XMB, with no game running, it still opens the main page.
+- **Added a controller hotkey.** Hold two buttons together to open the CheatRunner dashboard in the system browser — L2 + R3 by default, configurable from Settings → Hotkey. Re-hooks automatically within ~20 seconds after rest mode or a SceShellUI restart.
+- **Fixed: the hotkey could stop responding to a changed combo, or stop working entirely, if SceShellUI still had a hook resident from an earlier session.** Now detected — SceShellUI restarts once automatically to clear it.
+- **Fixed: launching CheatRunner while an instance was already running didn't kill the old one**, requiring a manual shutdown from the dashboard first.
+- **Fixed: the hotkey could crash SceShellUI (XMB) instead of hooking in**, on some firmwares. The injector freed a scratch memory region the instant setup finished — but a newly-created thread reaching that point only means it was *created*, not done bootstrapping onto its own stack. It could still be touching that memory, and freeing it corrupted unrelated state and crashed SceShellUI. Confirmed fixed on PS5.
+- **Hardened the hotkey's Mono module lookup** to use a fixed-size buffer instead of a heap allocation, avoiding a possible interaction with SceShellUI's own memory allocator.
+- **Fixed: three of the six names in the Support modal's "Special thanks" list were animating in sync** instead of independently — a missing per-name delay left the 1st, 5th, and 6th names sharing the same phase.
+- **Added an "Enable hotkey" switch in Settings → Hotkey, off by default.** On some firmwares (seen on 4.xx) the hook can still crash SceShellUI despite the fix above — the rest of CheatRunner works fully with it off; turn it on once you've confirmed it's stable on your firmware.
+- **Fixed a garbled "…" character** ("Search settings…", the health panel's "Loading…") showing as mojibake on the PS5 browser — replaced with plain periods.
+
+<details>
+<summary><b>v0.16</b></summary>
 
  **Removed the "Disable All Patches" button.** It disabled patches for every game on the console at once, which was confusing and easy to trigger by accident. Patches now enable/disable per-entry only, the same as cheats.
 - **Fixed: "CheatRunner is not responding" errors reported by several users.** Root cause: HTTP keep-alive (added late in v0.15) held connections open far longer than before, and the PS5 browser doesn't reuse them the way keep-alive expects — this could exhaust the concurrent-connection limit under normal polling. Reverted back to closing each connection after one request.
@@ -17,6 +34,8 @@
 - **Added patch autoload profiles.** Save your currently-applied patches for a game as a profile, and CheatRunner automatically re-applies them the next time that game launches, same as cheat autoload profiles.
 - **Added an "Autoload" badge on game tiles** for titles with a saved cheat and/or patch autoload profile, so you can tell at a glance without opening the trainer.
 - **Patch autoload now always finishes before cheat autoload starts** on game launch (previously both fired at the same time), so cheats that depend on a patched code path never race against the patch itself.
+
+</details>
 
 <details>
 <summary><b>v0.15</b></summary>
@@ -35,7 +54,7 @@
 - **Fixed: "Shutdown Payload" could silently hang forever** instead of closing CheatRunner, if a cheat apply was stuck at the exact moment shutdown was requested. Shutdown now always completes within a couple seconds either way.
 - **Enlarged the header logo** and made its glow match the active theme's color instead of always being red.
 - **Fixed:** the Cheats/Repositories/Patches tabs in the trainer modal could render as squashed, oversized capsules on the PS5 browser.
-- Attempted fix for a PS5-browser-only bug where the trainer modal's Patches/Repositories lists couldn't be scrolled down to reach lower content — improved but not fully confirmed resolved on hardware yet.
+- Attempted fix for a PS5-browser-only bug where the trainer modal's Patches/Repositories lists couldn't be scrolled down to reach lower content — improved but not fully confirmed resolved on PS5 yet.
 - **Fixed:** a Master Code cheat could show a false "Conflicts with active mod" against its own dependent, blocking it from being enabled, when the dependent's own name also mentioned "Master Code."
 - **Fixed:** cheats that require a Master Code showed a confusing "VERSION MISMATCH" (and couldn't be toggled) before the Master Code was enabled — now shows a clear "requires Master Code first" state instead.
 - **Fixed:** a Master Code's own button showed a false "PARTIAL PATCH" once its dependent cheats were enabled and writing into its shared cave, even though everything was working correctly.
@@ -51,10 +70,10 @@
 - **CheatRunner's home-screen tile now installs into Media Players instead of the Games library**, plus a follow-up `param.json` audit (badge type, locale key, DRM type) found by comparing PS5's own app database against a known Media-tab app.
 - **Fixed:** dashboard updates (new buttons, PS5 perf fixes) weren't showing up on PS5s that had already loaded the page — the AppCache manifest wasn't being bumped every release, and no JS handler existed to actually swap in an updated cache when one was detected. Both fixed.
 - **PS5 browser performance pass.** Removed Google Fonts (blocking external font load), added HTTP caching for static assets, replaced `backdrop-filter` blur with solid backgrounds, hid decorative background layers, converted several `box-shadow`/`clip-path` animations to cheap `opacity`/`transform`-only ones, disabled tile-stagger and a couple of scan-line animations during cheat toggle/launch, and stopped tile-selection from rebuilding the entire game grid on every click.
-- **Migrated the memory read/write engine from ptrace to mdbg.** ptrace required stopping the whole game process for every read/write, and two threads attaching at once could corrupt an in-progress patch — this was the root cause of games freezing mid-cheat-apply. Confirmed fixed on real hardware. Added a CR3-walk fallback for firmware 8.20+, where Sony's native mdbg write call silently stops working.
+- **Migrated the memory read/write engine from ptrace to mdbg.** ptrace required stopping the whole game process for every read/write, and two threads attaching at once could corrupt an in-progress patch — this was the root cause of games freezing mid-cheat-apply. Confirmed fixed on PS5. Added a CR3-walk fallback for firmware 8.20+, where Sony's native mdbg write call silently stops working.
 - **Went fully mdbg-only in the write path** — `kernel_mprotect` and the old ptrace-based code-cave remap fallback were removed entirely from writes.
 - **Full security/reliability audit (~22k lines).** Removed dead HTTP auth code that was never wired up, closed a shutdown race that could interrupt an in-flight write, and fixed several smaller bugs: an undefined-behavior shift in patch hex parsing, a duplicate constant, a signed-overflow bug in address math, an unguarded config read, and cross-module false positives in conflict detection.
-- **Fixed two real kernel-panic/console-freeze incidents**, both reproduced on hardware and traced to `kernel_mprotect` itself (not page-protection state) corrupting kernel memory on certain addresses. `kernel_mprotect` was removed from both the write path and the execute-only-memory read fallback; the patch mask-pattern scanner no longer scans past the first unreadable memory chunk.
+- **Fixed two real kernel-panic/console-freeze incidents**, both reproduced on PS5 and traced to `kernel_mprotect` itself (not page-protection state) corrupting kernel memory on certain addresses. `kernel_mprotect` was removed from both the write path and the execute-only-memory read fallback; the patch mask-pattern scanner no longer scans past the first unreadable memory chunk.
 - **Fixed a rapid-toggling freeze**, where a stalled PS5 notification call could lock up the entire cheat-apply subsystem because it ran while holding the apply lock. Also reduced the HTTP server's per-request memory allocation from a flat 4 MB to a small buffer that grows only when needed.
 - Added Maffioh to the Support modal's "Special thanks" list.
 - Bumped to **0.14**.

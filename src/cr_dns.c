@@ -11,9 +11,8 @@
 
 #include "cr_dns.h"
 
-/* Process-lifetime DNS cache — avoids re-resolving the same hostname thousands of times.
- * Entries never expire; the IPs of raw.githubusercontent.com / api.github.com are stable
- * across a single download session. */
+/* Process-lifetime DNS cache - avoids re-resolving the same hostname thousands of
+ * times. Entries never expire; the IPs we query stay stable across a session. */
 #define DNS_CACHE_MAX 16
 typedef struct { char host[128]; char ip[64]; } dns_cache_entry_t;
 static dns_cache_entry_t g_dns_cache[DNS_CACHE_MAX];
