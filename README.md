@@ -26,6 +26,16 @@ CheatRunner is free and open-source. If you find it useful, feel free to support
 <a href="https://ko-fi.com/maj0r"><img src="https://storage.ko-fi.com/cdn/kofi3.png?v=3" alt="Support me on Ko-fi" height="36"></a>
 <a href="https://buymeacoffee.com/maj0r"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy me a coffee" height="36"></a>
 
+**Donate via Crypto:**
+- **BTC** 
+```bc1ppfcad9ytyzmmzq3nfatfcag7q38rqcpsvxfqusq0uzv4gh82pa4syeknlk```
+- **BCH (Bitcoin Cash)** 
+```qz2h97c2pyexn3fwhveu33tn5xkd3qlfn5796zhtcq```
+- **USDC (Solana)** 
+```BNpezXSQWuUR9HWGjzQUS7AeEBCwiY2ZGxArWNwYXKKV```
+- **USDT (TON)**
+```UQA18f4cVS0778fL_nIssdN1GIHRYR7dQ3UnNgjPwgYvIQi_```
+
 
 ---
 
