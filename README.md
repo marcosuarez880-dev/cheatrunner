@@ -281,7 +281,7 @@ Recommended project layout:
 CheatRunner/
 ├── CheatRunnerPayload/
 │   ├── src/
-│   ├── CMakeLists.txt
+│   ├── Makefile
 │   └── build-cheatrunner.ps1
 └── PS5-Payload-dev/
     └── sdk-master/

@@ -1,6 +1,11 @@
 # CheatRunner — Changelog
 
-## v0.17
+## v0.17.1
+
+- **Added: support for 13.60 firmware** — rebuilt against the latest ps5-payload-sdk.
+
+<details>
+<summary><b>v0.17</b></summary>
 
 - **Fixed: the trainer/cheat menu, Settings page, and Support/donate popup could silently fail to appear on some PS5 firmwares** (reported on 4.03) — the "Cheat menu loaded" toast would show, but the menu itself never appeared, same for Settings and Support. Root cause, confirmed against that firmware's actual WebKit source: every full-screen overlay in the dashboard positioned itself with the CSS `inset` shorthand, which is gated behind WebKit's `CSSLogicalEnabled` runtime flag — off by default in this build. With `inset` silently dropped, the overlay never got a `top`/`right`/`bottom`/`left`, so it had no size or position to render at, regardless of `display`/`visibility`/`opacity`. (Two earlier attempts in this same release — switching `display:none` to `visibility`/`opacity`, then adding a `transition` — treated it as a compositing/paint timing issue and didn't address this.) Replaced `inset` with explicit `top`/`right`/`bottom`/`left` everywhere it was used for positioning (the three overlays, plus several decorative background/glow/shimmer effects that had the same silent failure but went unnoticed since they're cosmetic). Confirmed fixed on the reporting user's PS5.
 - **Fixed: the Settings page's ON/OFF toggle switches were too cramped for the text**, and the green "ON" fill sat slightly off-center — a CSS math bug on every toggle switch in the app, not just Settings.
@@ -15,6 +20,8 @@
 - **Fixed: three of the six names in the Support modal's "Special thanks" list were animating in sync** instead of independently — a missing per-name delay left the 1st, 5th, and 6th names sharing the same phase.
 - **Added an "Enable hotkey" switch in Settings → Hotkey, off by default.** On some firmwares (seen on 4.xx) the hook can still crash SceShellUI despite the fix above — the rest of CheatRunner works fully with it off; turn it on once you've confirmed it's stable on your firmware.
 - **Fixed a garbled "…" character** ("Search settings…", the health panel's "Loading…") showing as mojibake on the PS5 browser — replaced with plain periods.
+
+</details>
 
 <details>
 <summary><b>v0.16</b></summary>

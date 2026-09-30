@@ -53,7 +53,7 @@ cr_api_dashboard_handle(int fd, const char *method, const char *path,
   if (!strcmp(path, "/cache.appcache")) {
     static const char appcache[] =
       "CACHE MANIFEST\n"
-      "# CheatRunner v0.17\n"
+      "# CheatRunner v0.17.1\n"
       "# Build: " __DATE__ " " __TIME__ "\n"
       "\n"
       "CACHE:\n"

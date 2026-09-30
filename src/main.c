@@ -30,7 +30,7 @@
 #include "cr_tile_pkg.h"
 
 #ifndef CHEATRUNNER_VERSION
-#define CHEATRUNNER_VERSION "0.17"
+#define CHEATRUNNER_VERSION "0.17.1"
 #endif
 
 /* Async-signal-safe crash handler: writes a one-line entry to the crash log
