@@ -1,5 +1,9 @@
 # CheatRunner — Changelog
 
+## v0.17.2
+
+- **Fixed: writes on FW 13.60.**
+
 ## v0.17.1
 
 - **Added: support for 13.60 firmware** — rebuilt against the latest ps5-payload-sdk.
