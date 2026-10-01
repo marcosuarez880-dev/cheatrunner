@@ -38,10 +38,10 @@ mdbg_io_copyout(pid_t pid, intptr_t addr, void *buf, size_t len) {
 
 static unsigned long
 vmspace_pmap_offset(unsigned int fw) {
-  if (fw >= 0x100 && fw <= 0x102) return 0x2C0;
-  if (fw >= 0x105 && fw <= 0x550) return 0x2E0;
-  if (fw >= 0x600 && fw <= 0x1340) return 0x2E8;
-  return 0; /* unsupported fw version */
+  /* Offset comes from the ps5-payload-sdk (set per firmware in __kernel_init).
+   * The old hard-coded table stopped at 13.40 and blocked every write on 13.60. */
+  (void)fw;
+  return (unsigned long)KERNEL_OFFSET_VMSPACE_VM_PMAP; /* 0 = firmware not supported by the SDK */
 }
 
 static unsigned long g_dmap_base = 0;
