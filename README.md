@@ -320,7 +320,7 @@ build/CheatRunner.elf
 
 CheatRunner exists thanks to the PS4/PS5 homebrew and research community.
 
-Special thanks to:
+Special thanks to:elf arsenal
 
 - **[ELF Arsenal](https://git.etawen.dev/soniciso/elf-arsenal) & VoidShell** for project ideas and implementations;
 - **[ps5-payload-dev](https://github.com/ps5-payload-dev)**: [sdk](https://github.com/ps5-payload-dev/sdk), [elfldr](https://github.com/ps5-payload-dev/elfldr), [websrv](https://github.com/ps5-payload-dev/websrv), [pacbrew-repo](https://github.com/ps5-payload-dev/pacbrew-repo);
